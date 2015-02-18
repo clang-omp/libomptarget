@@ -1,1 +1,1 @@
-# libiomptarget
+# libomptarget
