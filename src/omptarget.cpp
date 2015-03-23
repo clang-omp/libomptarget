@@ -478,7 +478,20 @@ EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
   for(int32_t i=0; i<arg_num; ++i){
     void *HstPtrBegin = args[i];
     void *HstPtrBase = args_base[i];
-    long IsNew;
+    void *Pointer_TgtPtrBegin;
+    long IsNew, Pointer_IsNew;
+    if (arg_types[i] & tgt_map_pointer) {
+      DP("has a pointer entry: \n");
+      // base is address of poiner
+      Pointer_TgtPtrBegin = DevInfo.getOrAllocTgtPtr(RTL, TdeviceId, HstPtrBase, 
+        HstPtrBase, sizeof(void *), Pointer_IsNew);
+      DP("There are %ld bytes allocated at target address %016lx\n",
+         (long)sizeof(void *), (long)Pointer_TgtPtrBegin);
+      assert(Pointer_TgtPtrBegin && "Data allocation by RTL returned invalid ptr");
+      // modify current entry
+      HstPtrBase = * (void **) HstPtrBase;
+    }
+
     void *TgtPtrBegin = DevInfo.getOrAllocTgtPtr(RTL, TdeviceId, HstPtrBegin, 
       HstPtrBase, arg_sizes[i], IsNew);
     DP("There are %ld bytes allocated at target address %016lx\n",
@@ -492,30 +505,14 @@ EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
       RTL->data_submit(TdeviceId, TgtPtrBegin, HstPtrBegin, arg_sizes[i]);
     }
 
-    if (arg_types[i] & tgt_map_pointer){
-      ++i;
-      assert(i<arg_num && (arg_types[i] & tgt_map_extra) && 
-        "Expecting extra after pointer");
-
-      void *ExtraTgrPtrBegin = DevInfo.getOrAllocTgtPtr(RTL, TdeviceId, args[i], 
-        args_base[i], arg_sizes[i], IsNew);
-      DP("There are %ld bytes allocated at target address %016lx that will "
-        "be used to update pointer\n", (long)arg_sizes[i], (long)ExtraTgrPtrBegin);
-      if ((arg_types[i] & tgt_map_to) && 
-        (IsNew || (arg_types[i] & tgt_map_always))) {
-        DP("Moving %ld bytes (hst:%016lx) -> (tgt:%016lx)\n",
-          (long)arg_sizes[i], (long)args[i], (long)ExtraTgrPtrBegin);
-        RTL->data_submit(TdeviceId, ExtraTgrPtrBegin, args[i], arg_sizes[i]);
-      }
-
+    if (arg_types[i] & tgt_map_pointer && Pointer_IsNew){
       DP("Update pointer (%016lx) -> [%016lx]\n", 
-        (long)ExtraTgrPtrBegin, (long)TgtPtrBegin);
-      uint64_t Delta = (uint64_t) args[i] - (uint64_t) args_base[i];
-      void *ExtraTgrPtrBase = (void *)((uint64_t) ExtraTgrPtrBegin - Delta);
-      RTL->data_submit(TdeviceId, TgtPtrBegin, &ExtraTgrPtrBase, sizeof(void*));
+        (long)Pointer_TgtPtrBegin, (long)TgtPtrBegin);
+      uint64_t Delta = (uint64_t) HstPtrBegin - (uint64_t) HstPtrBase;
+      void *TgrPtrBase_Value = (void *)((uint64_t) TgtPtrBegin - Delta);
+      RTL->data_submit(TdeviceId, Pointer_TgtPtrBegin, &TgrPtrBase_Value, sizeof(void*));
     }
   }
-
 }
 
 
@@ -552,10 +549,17 @@ EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num,
   // process each input
   for(int32_t i=0; i<arg_num; ++i){
     void *HstPtrBegin = args[i];
-    //void *HstPtrBase = args_base[i];
+    void *HstPtrBase = args_base[i];
     long IsLast;
-    void *TgtPtrBegin = DevInfo.getTgtPtrBegin(HstPtrBegin, arg_sizes[i], IsLast);
     long ForceDelete = arg_types[i] & tgt_map_delete;
+    if (arg_types[i] & tgt_map_pointer) {
+      // base is pointer begin
+      DevInfo.getTgtPtrBegin(HstPtrBase, sizeof(void*), IsLast);
+      if (IsLast || ForceDelete) {
+        DevInfo.deallocTgtPtr(RTL, TdeviceId, HstPtrBase, sizeof(void*), ForceDelete);
+      }
+    }
+    void *TgtPtrBegin = DevInfo.getTgtPtrBegin(HstPtrBegin, arg_sizes[i], IsLast);
     long Always = arg_types[i] & tgt_map_always;
     if ((arg_types[i] & tgt_map_from) && (IsLast || ForceDelete || Always)) {
       DP("Moving %ld bytes (tgt:%016lx) -> (hst:%016lx)\n", (long)arg_sizes[i],
@@ -807,13 +811,21 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
 
     void * HstPtrBegin = args[i];
     void * HstPtrBase = args_base[i];
-    uint64_t PtrDelta = (uint64_t) HstPtrBegin - (uint64_t)HstPtrBase;
-    DP("Obtaining target argument from host pointer %016lx\n", 
-      (long)HstPtrBegin);
+    void *TgtPtrBase;
     long IsLast; // unused
-    void * TgtPtrBegin = DevInfo.getTgtPtrBegin(HstPtrBegin, arg_sizes[i], IsLast);
-    assert(TgtPtrBegin && "NULL argument for hst ptr");
-    void *TgtPtrBase = (void *)((uint64_t) TgtPtrBegin - PtrDelta);
+    if (arg_types[i] & tgt_map_pointer) {
+      DP("Obtaining target argument from host pointer %016lx to object %016lx \n", 
+        (long)HstPtrBase, (long)HstPtrBegin);
+      void * TgtPtrBegin = DevInfo.getTgtPtrBegin(HstPtrBase, sizeof(void *), IsLast);
+      TgtPtrBase = TgtPtrBegin; // no offset for ptrs
+    } else {
+      DP("Obtaining target argument from host pointer %016lx\n", 
+        (long)HstPtrBegin);
+      void * TgtPtrBegin = DevInfo.getTgtPtrBegin(HstPtrBegin, arg_sizes[i], IsLast);
+      assert(TgtPtrBegin && "NULL argument for hst ptr");
+      uint64_t PtrDelta = (uint64_t) HstPtrBegin - (uint64_t)HstPtrBase;
+      TgtPtrBase = (void *)((uint64_t) TgtPtrBegin - PtrDelta);
+    }
     tgt_args.push_back(TgtPtrBase);
   }
 
