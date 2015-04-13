@@ -1,8 +1,4 @@
-################################################################################
-#
 # libomptarget - OpenMP offloading runtime libraries for Clang 
-#
-################################################################################
 
 This is a prototype implementation of the OpenMP offloading library to be 
 supported by Clang. The current implementation has been tested in Linux so far.
@@ -25,21 +21,17 @@ All the libraries will be created in ./lib folder. Typically, you will get:
 
 libomptarget.so - The main and target agnostic library
 
-libomptarget.rtl.<toolkit name>.so - The target specific plugins. These plugins 
+libomptarget.rtl.[toolkit name].so - The target specific plugins. These plugins 
 are loaded at runtime by libomptarget.so to interact with a given device.
 
-libomptarget-<target name>.[a,so] - The target specific runtime libraries. These 
+libomptarget-[target name].[a,so] - The target specific runtime libraries. These 
 libraries should be passed to the target linker as they implement the runtime 
 calls produced by Clang during code generation. 
 
 Note that the interface of all the libraries in this project  is likely to 
 change in the future.
 
-######################
-#
 # Target agnostic offloading - libomptarget.so
-#
-######################
 
 This component contains the logic to launch the initialization of the devices 
 supported by the current program, create device data environments and launch 
@@ -53,11 +45,7 @@ This component has been tested for:
                
 The code of this component is under ./src
 
-######################
-#
-# Target specific plugins - libomptarget.rtl.<toolkit name>.so
-#
-######################
+# Target specific plugins - libomptarget.rtl.[toolkit name].so
  
 These plugins are used by libomptarget.so to deal with a given target. They all 
 use the same interface and implement basic functionality like device 
@@ -72,11 +60,7 @@ The current implementation supports the following plugins:
                           
 The code for this component is under ./RTLs
 
-######################
-#
-# Target specific runtime libraries - libomptarget-<target name>.[a,so]
-#
-######################
+# Target specific runtime libraries - libomptarget-[target name].[a,so]
                           
 These libraries implement the OpenMP runtime calls used by a given device during 
 execution.
