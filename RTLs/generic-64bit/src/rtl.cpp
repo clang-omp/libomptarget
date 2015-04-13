@@ -183,10 +183,9 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id, __tgt_device_image 
     }
   }
 
-  elf_end(e);
-
   if (!entries_offset) {
     DP("Entries Section Offset Not Found\n");
+    elf_end(e);
     return NULL;
   }
 
