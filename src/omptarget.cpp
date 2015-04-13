@@ -67,8 +67,9 @@ struct DeviceInfoTy {
     PendingConstrDestrHostPtrList() {}
 
   void *getOrAllocTgtPtr(RTLInfoTy *RTL, int32_t TdeviceId, void* HstPtrBegin, 
-    void* HstPtrBase, long Size, long &IsNew);
-  void *getTgtPtrBegin(void* HstPtrBegin, long Size, long &IsLast);
+    void* HstPtrBase, long Size, long &IsNew, long UpdateRefCount = true);
+  void *getTgtPtrBegin(void* HstPtrBegin, long Size, long &IsLast,
+      long UpdateRefCount = true);
   void deallocTgtPtr(RTLInfoTy *RTL, int32_t TdeviceId, void* TgtPtrBegin, 
     long Size, long ForceDelete);
 };
@@ -173,9 +174,11 @@ int omp_is_initial_device(void){
 // functionality for device
 
 // return the target pointer begin (where the data will be moved)
-void *DeviceInfoTy::getTgtPtrBegin(void* HstPtrBegin, long Size, long &IsLast)
+void *DeviceInfoTy::getTgtPtrBegin(void* HstPtrBegin, long Size, long &IsLast,
+                                   long UpdateRefCount)
 {
   long hp = (long) HstPtrBegin;
+  IsLast = false;
 
   for (HostDataToTargetListTy::iterator
       ii=HostDataToTargetMap.begin(), 
@@ -185,18 +188,24 @@ void *DeviceInfoTy::getTgtPtrBegin(void* HstPtrBegin, long Size, long &IsLast)
       if ((hp + Size) > HT.HstPtrEnd) {
         DP("WARNING: Array contain pointer but does not contain the complete section\n");
       }
-      IsLast = (HT.RefCount == 1);
+
+      IsLast = !(HT.RefCount > 1);
+
+      if (HT.RefCount > 1 && UpdateRefCount)
+        --HT.RefCount;
+
       long tp = HT.TgtPtrBegin + (hp - HT.HstPtrBegin);
       return (void*)tp;
     }
   }
-  IsLast = false;
+
   return NULL;
 }
 
 // return the target pointer begin (where the data will be moved)
 void *DeviceInfoTy::getOrAllocTgtPtr(RTLInfoTy *RTL, int32_t TdeviceId, 
-  void* HstPtrBegin, void* HstPtrBase, long Size, long &IsNew) 
+  void* HstPtrBegin, void* HstPtrBase, long Size, long &IsNew,
+  long UpdateRefCount)
 {
   long hp = (long) HstPtrBegin;
   IsNew = false;
@@ -212,7 +221,8 @@ void *DeviceInfoTy::getOrAllocTgtPtr(RTLInfoTy *RTL, int32_t TdeviceId,
       if ((hp + Size) > HT.HstPtrEnd) {
         DP("WARNING: Array contain pointer but does not contain the complete section\n");
       }
-      ++HT.RefCount;
+      if (UpdateRefCount)
+        ++HT.RefCount;
       long tp = HT.TgtPtrBegin + (hp - HT.HstPtrBegin);
       return (void*)tp;
     }
@@ -494,9 +504,10 @@ EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
 
     void *TgtPtrBegin = DevInfo.getOrAllocTgtPtr(RTL, TdeviceId, HstPtrBegin, 
       HstPtrBase, arg_sizes[i], IsNew);
-    DP("There are %ld bytes allocated at target address %016lx\n",
-      (long)arg_sizes[i], (long)TgtPtrBegin);
+    DP("There are %ld bytes allocated at target address %016lx - is new %ld\n",
+      (long)arg_sizes[i], (long)TgtPtrBegin, IsNew);
     assert(TgtPtrBegin && "Data allocation by RTL returned invalid ptr");
+
 
     if ((arg_types[i] & tgt_map_to) && 
         (IsNew || (arg_types[i] & tgt_map_always))) {
@@ -560,6 +571,10 @@ EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num,
       }
     }
     void *TgtPtrBegin = DevInfo.getTgtPtrBegin(HstPtrBegin, arg_sizes[i], IsLast);
+
+    DP("There are %ld bytes allocated at target address %016lx - is last %ld\n",
+          (long)arg_sizes[i], (long)TgtPtrBegin, IsLast);
+
     long Always = arg_types[i] & tgt_map_always;
     if ((arg_types[i] & tgt_map_from) && (IsLast || ForceDelete || Always)) {
       DP("Moving %ld bytes (tgt:%016lx) -> (hst:%016lx)\n", (long)arg_sizes[i],
@@ -605,7 +620,7 @@ EXTERN void __tgt_target_data_update(int32_t device_id, int32_t arg_num,
     void *HstPtrBegin = args[i];
     //void *HstPtrBase = args_base[i];
     long IsLast;
-    void *TgtPtrBegin = DevInfo.getTgtPtrBegin(HstPtrBegin, arg_sizes[i], IsLast);
+    void *TgtPtrBegin = DevInfo.getTgtPtrBegin(HstPtrBegin, arg_sizes[i], IsLast, false);
     if (arg_types[i] & tgt_map_from) {
       DP("Moving %ld bytes (tgt:%016lx) -> (hst:%016lx)\n", (long)arg_sizes[i],
         (long)TgtPtrBegin, (long)HstPtrBegin);
@@ -783,7 +798,7 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
         assert(CurrDeviceEntry->size == CurrHostEntry->size && "data size mismatch");
         long IsLast;
         assert(DevInfo.getTgtPtrBegin(CurrHostEntry->addr, CurrHostEntry->size, 
-          IsLast) == NULL && "data in declared target should not be already mapped");
+          IsLast, false) == NULL && "data in declared target should not be already mapped");
         // add entry to map
         DP("add mapping from host 0x%llx to 0x%llx with size %lld\n\n",  
           (unsigned long long) CurrHostEntry->addr,
@@ -816,12 +831,12 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
     if (arg_types[i] & tgt_map_pointer) {
       DP("Obtaining target argument from host pointer %016lx to object %016lx \n", 
         (long)HstPtrBase, (long)HstPtrBegin);
-      void * TgtPtrBegin = DevInfo.getTgtPtrBegin(HstPtrBase, sizeof(void *), IsLast);
+      void * TgtPtrBegin = DevInfo.getTgtPtrBegin(HstPtrBase, sizeof(void *), IsLast, false);
       TgtPtrBase = TgtPtrBegin; // no offset for ptrs
     } else {
       DP("Obtaining target argument from host pointer %016lx\n", 
         (long)HstPtrBegin);
-      void * TgtPtrBegin = DevInfo.getTgtPtrBegin(HstPtrBegin, arg_sizes[i], IsLast);
+      void * TgtPtrBegin = DevInfo.getTgtPtrBegin(HstPtrBegin, arg_sizes[i], IsLast, false);
       assert(TgtPtrBegin && "NULL argument for hst ptr");
       uint64_t PtrDelta = (uint64_t) HstPtrBegin - (uint64_t)HstPtrBase;
       TgtPtrBase = (void *)((uint64_t) TgtPtrBegin - PtrDelta);

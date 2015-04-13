@@ -29,8 +29,8 @@ enum tgt_map_type{
   tgt_map_alloc     = 0x00,   // allocate memory in the device for this reference
   tgt_map_to        = 0x01,   // copy the data to the device but do not update the host memory
   tgt_map_from      = 0x02,   // copy the data to the host but do not update the device memory
-  tgt_map_always    = 0x03,   // copy the data to the host but do not update the device memory
-  tgt_map_release   = 0x04,
+  tgt_map_always    = 0x04,
+  tgt_map_release   = 0x08,
   tgt_map_delete    = 0x18,
   tgt_map_pointer   = 0x20,
   tgt_map_extra     = 0x40
