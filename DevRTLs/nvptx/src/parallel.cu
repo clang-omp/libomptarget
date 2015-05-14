@@ -39,8 +39,8 @@
 // support for parallel that goes parallel (1 static level only)
 ////////////////////////////////////////////////////////////////////////////////
 
-// return 0 if sequential, 1 if in parallel
-EXTERN int __kmpc_kernel_prepare_parallel()
+// return number of threads that participate to parallel
+EXTERN int __kmpc_kernel_prepare_parallel(int numThreads, int numLanes)
 {
   PRINT0(LD_IO , "call to __kmpc_kernel_init_parallel\n");
   int globalThreadId = GetGlobalThreadId();
@@ -49,6 +49,8 @@ EXTERN int __kmpc_kernel_prepare_parallel()
   ASSERT0(LT_FUSSY, currTaskDescr, "expected a top task descr");
   if (currTaskDescr->InParallelRegion()) {
     PRINT0(LD_PAR, "already in parallel: go seq\n");
+
+    // todo: support nested parallelism
     return FALSE;
   }
   uint16_t tnum = omptarget_nvptx_threadPrivateContext.NumThreadsForNextParallel(globalThreadId);
@@ -75,11 +77,11 @@ EXTERN int __kmpc_kernel_prepare_parallel()
   workDescr.WorkTaskDescr()->CopyToWorkDescr(currTaskDescr, tnum);
   // init counters (copy start to init)
   workDescr.CounterGroup().Reset();
-  return tnum > 1;
+  return tnum;
 }
 
 // works only for active parallel looop...
-EXTERN void __kmpc_kernel_parallel()
+EXTERN void __kmpc_kernel_parallel(int numLanes)
 {
   PRINT0(LD_IO | LD_PAR, "call to __kmpc_kernel_parallel\n");
   // init work descriptor from workdesccr

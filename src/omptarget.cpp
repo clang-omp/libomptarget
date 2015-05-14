@@ -516,7 +516,7 @@ EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
       RTL->data_submit(TdeviceId, TgtPtrBegin, HstPtrBegin, arg_sizes[i]);
     }
 
-    if (arg_types[i] & tgt_map_pointer && Pointer_IsNew){
+    if (arg_types[i] & tgt_map_pointer /* && Pointer_IsNew */){
       DP("Update pointer (%016lx) -> [%016lx]\n", 
         (long)Pointer_TgtPtrBegin, (long)TgtPtrBegin);
       uint64_t Delta = (uint64_t) HstPtrBegin - (uint64_t) HstPtrBase;

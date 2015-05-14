@@ -47,6 +47,13 @@ EXTERN void __kmpc_kernel_init()
     // InitTeamDescr()
     omptarget_nvptx_threadPrivateContext.SetTopLevelTaskDescr(globalThreadId, 
       currTeamDescr.LevelZeroTaskDescr());
+    
+    // set number of threads in team to started value
+    int globalThreadId = GetGlobalThreadId();
+    omptarget_nvptx_TaskDescr *currTaskDescr =
+        omptarget_nvptx_threadPrivateContext.GetTopLevelTaskDescr(
+            globalThreadId);
+    currTaskDescr->NThreads() = GetNumberOfThreadsInBlock();
   }
 }
 

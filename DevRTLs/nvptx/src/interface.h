@@ -574,8 +574,8 @@ EXTERN double _Complex __kmpc_atomic_cmplx8_swp_cpt (kmp_Indent *loc, int gtid, 
 
 // non standard
 EXTERN void __kmpc_kernel_init();
-EXTERN int  __kmpc_kernel_prepare_parallel();
-EXTERN void __kmpc_kernel_parallel();
+EXTERN int  __kmpc_kernel_prepare_parallel(int numThreads, int numLanes);
+EXTERN void __kmpc_kernel_parallel(int numLanes);
 EXTERN void __kmpc_kernel_end_parallel();
 
 #endif

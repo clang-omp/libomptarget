@@ -17,14 +17,79 @@
 
 EXTERN 
 int32_t __kmpc_reduce(kmp_Indent *loc, int32_t global_tid, int32_t num_vars, size_t reduce_size, void *reduce_data, kmp_ReductFctPtr *reductFct, kmp_CriticalName *lck) {
-	// use atomic implementation
-        return 2;
+	return 2;
+	/**
+	 * Only when all the threads in a block are doing reduction,
+	 * the warpBlockRedu is used. Otherwise atomic.
+	 * check the data type, too.
+	 * A special case: when the size of thread group is one,
+	 * do reduction directly.
+	 **/
+	
+	// Note: this code provokes warning because it follows a "return"
+	
+	//since there is no thread interface yet, just infer from the 
+	// result of ballot
+#if 0
+	unsigned tnum = __ballot(1);
+	if (tnum != (~0x0)) { //assume swapSize is 32
+		return 2;
+	}
+#endif
+	
+#if 0
+	if (threadIdx.x == 0) {
+		if ((void *)reductFct != (void *)omp_reduction_op) {
+			printf("function pointer value is not correct\n");
+		} else {
+			printf("function pointer value is correct\n");
+		}
+	}
+#endif
+
+#if 0
+	(*reductFct)((char*)reduce_data, (char*)reduce_data);
+	//omp_reduction_op((char*)reduce_data, (char*)reduce_data);
+	
+	//int **myp = (int **) reduce_data;
+	// the results are with thread 0. Reduce to the shared one
+	if (threadIdx.x == 0) {
+		//printf("function pointer %p %p\n", reductFct, omp_reduction_op);
+	 //   	printf("my result %d\n", *myp[0]);
+		return 1;
+	} else {
+		return 0;
+	}
+#endif
 }
 
 EXTERN 
 int32_t __kmpc_reduce_nowait(kmp_Indent *loc, int32_t global_tid, int32_t num_vars, size_t reduce_size, void *reduce_data, kmp_ReductFctPtr *reductFct, kmp_CriticalName *lck) {
-	// use atomic implementation
-        return 2;
+	return 2;
+
+	// Notice: as above, uncomment if 0 once this code below is ready for shipping
+#if 0
+	unsigned tnum = __ballot(1);
+	if (tnum != (~0x0)) { //assume swapSize is 32
+		return 2;
+	}
+
+	if (threadIdx.x == 0) {
+		printf("choose block reduction\n");
+	}
+
+	(*reductFct)(reduce_data, reduce_data);
+	//omp_reduction_op((char*)reduce_data, (char*)reduce_data);
+
+	int **myp = (int **) reduce_data;
+	// the results are with thread 0. Reduce to the shared one
+	if (threadIdx.x == 0) {
+	    	printf("my result %d\n", *myp[0]);
+		return 1;
+	} else {
+		return 0;
+	}
+#endif
 }
 
 EXTERN
@@ -63,7 +128,7 @@ void __kmpc_end_reduce_nowait( kmp_Indent *loc, int32_t global_tid, kmp_Critical
 // keep for debugging 
 EXTERN 
 void __kmpc_atomic_fixed4_add(kmp_Indent *id_ref, int32_t gtid, int32_t * lhs, int32_t rhs) {
-	if (gtid < 64)
+	//if (gtid < 64)
         PRINT(LD_LOOP, "thread %d participating in reduction, lhs = %p, rhs = %d\n", gtid, lhs, rhs);
         atomicAdd(lhs, rhs);
 }
@@ -110,6 +175,23 @@ INLINE __device__ float complex atomicCAS(float complex *_addr, float complex _c
 	double  compare = (double)(_compare);
 	double  val = (double)(_val);
 	return (float complex) (atomicCAS(addr, compare, val));
+}
+
+#define ATOMIC_GENOP_NATIVE(_name, _dtype, _op, _cudaop) \
+        EXTERN void __kmpc_atomic_##_name##_##_op\
+        (kmp_Indent *id_ref, int32_t gtid, _dtype * lhs, _dtype rhs) { \
+	PRINT(LD_LOOP, "Reduction: thead %d\n", gtid); \
+	atomic##_cudaop(lhs, rhs); \
+} \
+  \
+        EXTERN _dtype __kmpc_atomic_##_name##_##_op##_cpt\
+        (kmp_Indent *id_ref, int32_t gtid, _dtype * lhs, _dtype rhs, int flag) { \
+	_dtype old =  atomic##_cudaop(lhs, rhs); \
+	if (flag) { \
+		return omptarget_nvptx_##_op(old, rhs); \
+	} else {\
+		return old; \
+	} \
 }
 
 /*for types that are supported directly by atomicCAS */
@@ -302,6 +384,45 @@ ATOMIC_GENOP_FC_REV(div);
 /* for test */
 //ATOMIC_GENOP_DIRECT(fixed4, int32_t, add);
 
+//for int and unit
+#define ATOMIC_GENOP_ALL_MIXED(_name, _dirname, _tname, _optype) \
+	_dirname(_tname, _optype, add, Add) ;\
+	_dirname(_tname, _optype, sub, Sub) ;\
+	_name##_REV(_tname, _optype, sub) ;\
+	_name(_tname, _optype, mul) ;\
+	_name(_tname, _optype, div) ;\
+	_name##_REV(_tname, _optype, div) ;\
+	_dirname(_tname, _optype, min, Min) ;\
+	_dirname(_tname, _optype, max, Max) ;\
+	_dirname(_tname, _optype, andb, And) ;\
+	_dirname(_tname, _optype, orb, Or) ;\
+	_dirname(_tname, _optype, xor, Xor) ;\
+	_name(_tname, _optype, shl) ;\
+	_name(_tname, _optype, shr) ;\
+	_name(_tname, _optype, andl) ;\
+	_name(_tname, _optype, orl) ; \
+	_name(_tname, _optype, eqv) ; \
+	_name(_tname, _optype, neqv) ;
+
+
+#define ATOMIC_GENOP_ALL_MIXED_FIXED8U(_name, _dirname, _tname, _optype) \
+	_dirname(_tname, _optype, add, Add) ;\
+	_name(_tname, _optype, sub) ;\
+	_name##_REV(_tname, _optype, sub) ;\
+	_name(_tname, _optype, mul) ;\
+	_name(_tname, _optype, div) ;\
+	_name##_REV(_tname, _optype, div) ;\
+	_dirname(_tname, _optype, min, Min) ;\
+	_dirname(_tname, _optype, max, Max) ;\
+	_dirname(_tname, _optype, andb, And) ;\
+	_dirname(_tname, _optype, orb, Or) ;\
+	_dirname(_tname, _optype, xor, Xor) ;\
+	_name(_tname, _optype, shl) ;\
+	_name(_tname, _optype, shr) ;\
+	_name(_tname, _optype, andl) ;\
+	_name(_tname, _optype, orl) ; \
+	_name(_tname, _optype, eqv) ; \
+	_name(_tname, _optype, neqv) ;
 
 #define ATOMIC_GENOP_ALL(_name, _tname, _optype) \
 	_name(_tname, _optype, add) ;\
@@ -335,10 +456,16 @@ ATOMIC_GENOP_FC_REV(div);
 
 
 
-ATOMIC_GENOP_ALL(ATOMIC_GENOP_DIRECT, fixed4, int32_t);
-ATOMIC_GENOP_ALL(ATOMIC_GENOP_DIRECT, fixed4u, uint32_t);
+//ATOMIC_GENOP_ALL(ATOMIC_GENOP_DIRECT, fixed4, int32_t);
+//ATOMIC_GENOP_ALL(ATOMIC_GENOP_DIRECT, fixed4u, uint32_t);
+ATOMIC_GENOP_ALL_MIXED(ATOMIC_GENOP_DIRECT, ATOMIC_GENOP_NATIVE, fixed4, int32_t);
+ATOMIC_GENOP_ALL_MIXED(ATOMIC_GENOP_DIRECT, ATOMIC_GENOP_NATIVE, fixed4u, uint32_t);
+
+
 ATOMIC_GENOP_ALL(ATOMIC_GENOP_DIRECT, fixed8, int64_t);
+
 ATOMIC_GENOP_ALL(ATOMIC_GENOP_DIRECT, fixed8u, uint64_t);
+//ATOMIC_GENOP_ALL_MIXED_FIXED8U(ATOMIC_GENOP_DIRECT, ATOMIC_GENOP_NATIVE, fixed8u, uint64_t);
 
 ATOMIC_GENOP_FLOAT(ATOMIC_GENOP_DIRECT, float4, float);
 ATOMIC_GENOP_FLOAT(ATOMIC_GENOP_DIRECT, float8, double);
@@ -412,6 +539,95 @@ INLINE __device__ OpType Compute(OpType a, OpType b) // a is old value, b is new
   return res;
 }
 
+
+template<> 
+INLINE __device__ float Compute<float, omptarget_nvptx_add>(float a, float b) 
+{
+	return a+b;
+}
+
+template<> 
+INLINE __device__ float Compute<float, omptarget_nvptx_sub>(float a, float b) 
+{
+	return a-b;
+}
+
+template<> 
+INLINE __device__ float Compute<float, omptarget_nvptx_mul>(float a, float b) 
+{
+	return a*b;
+}
+
+template<> 
+INLINE __device__ float Compute<float, omptarget_nvptx_div>(float a, float b) 
+{
+	return a/b;
+}
+
+template<> 
+INLINE __device__ float Compute<float, omptarget_nvptx_min>(float a, float b) 
+{
+	return a<b?a:b;
+}
+
+template<> 
+INLINE __device__ float Compute<float, omptarget_nvptx_max>(float a, float b) 
+{
+	return a>b?a:b;
+}
+
+template<> 
+INLINE __device__ double Compute<double, omptarget_nvptx_add>(double a, double b) 
+{
+	return a+b;
+}
+
+template<> 
+INLINE __device__ double Compute<double, omptarget_nvptx_sub>(double a, double b) 
+{
+	return a-b;
+}
+
+template<> 
+INLINE __device__ double Compute<double, omptarget_nvptx_mul>(double a, double b) 
+{
+	return a*b;
+}
+
+template<> 
+INLINE __device__ double Compute<double, omptarget_nvptx_div>(double a, double b) 
+{
+	return a/b;
+}
+
+template<> 
+INLINE __device__ double Compute<double, omptarget_nvptx_min>(double a, double b) 
+{
+	return a<b?a:b;
+}
+
+template<> 
+INLINE __device__ double Compute<double, omptarget_nvptx_max>(double a, double b) 
+{
+	return a>b?a:b;
+}
+
+#if 0
+template <
+  omptarget_nvptx_BINOP_t binop          // enum describing the operation
+>
+INLINE __device__ float Compute<float, binop>(float a, float b) // a is old value, b is new value
+{
+  OpType res = 0;
+  if (binop == omptarget_nvptx_add)     res = a + b;
+  if (binop == omptarget_nvptx_sub)     res = a - b;
+  if (binop == omptarget_nvptx_mul)     res = a * b;
+  if (binop == omptarget_nvptx_div)     res = a / b;
+  if (binop == omptarget_nvptx_min)     res = a < b ? a : b;
+  if (binop == omptarget_nvptx_max)     res = a > b ? a : b;
+  return res;
+}
+#endif
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -607,3 +823,202 @@ ATOMIC_GENOP_ALL4(ATOMIC_GENOP_PARTIAL, fixed1u, uint8_t, int32_t);
 ATOMIC_GENOP_ALL4(ATOMIC_GENOP_PARTIAL, fixed2u, uint16_t, int32_t);
 ATOMIC_GENOP_ALL4(ATOMIC_GENOP_PARTIAL, fixed2, int16_t, int32_t);
 
+/** cooperative reduction 
+ *  make use of warp, shared variable, and __syncthreads
+ **/
+
+
+
+
+template<typename T>
+INLINE __device__ T myshfldown(T val, unsigned int delta, int size=warpSize) {
+	return __shfl_down(val, delta, size);
+#if 0
+	T ret = 0;
+	int localv;
+	int remotev;
+	/* not finished */
+	switch(sizeof(T)) {
+	case 1:
+	case 2:
+		localv = reinterpret_cast<int>(val);
+		remotev = __shfl_down(localv, delta, size);
+		ret = reinterpret_cast<T>(remotev);
+		break;
+	break;
+	
+	}
+	return ret;
+#endif
+}
+
+#if 0
+template<>
+INLINE __device__ float myshfldown<float>(float val, unsigned int delta, int size) {
+	int t = __float_as_int(val);
+	int t1 = __shfl_down(t, delta, size);
+	float ret = __int_as_float<float>(t1);
+	return ret;
+}
+#endif
+
+template<>
+INLINE __device__ int myshfldown<int>(int val, unsigned int delta, int size) {
+	return __shfl_down(val, delta, size);
+}
+
+template<>
+INLINE __device__ unsigned int myshfldown<unsigned int>(unsigned int val, unsigned int delta, int size) {
+	return __shfl_down(val, delta, size);
+}
+
+template<>
+INLINE __device__ int64_t myshfldown<int64_t>(int64_t val, unsigned int delta, int size) {
+	return __shfl_down(val, delta, size);
+}
+
+template<>
+INLINE __device__ uint64_t myshfldown<uint64_t>(uint64_t val, unsigned int delta, int size) {
+	return __shfl_down(val, delta, size);
+}
+
+
+template<>
+INLINE __device__ float myshfldown<float>(float val, unsigned int delta, int size) {
+	return __shfl_down(val, delta, size);
+}
+
+template<>
+INLINE __device__ double myshfldown<double>(double val, unsigned int delta, int size) {
+	return __shfl_down(val, delta, size);
+}
+
+template<>
+INLINE __device__ unsigned long long  myshfldown<unsigned long long >(unsigned long long  val, unsigned int delta, int size) {
+	return __shfl_down(val, delta, size);
+}
+
+
+
+template <typename T, omptarget_nvptx_BINOP_t binop>
+__inline__ __device__
+T reduInitVal() {
+	switch(binop) {
+   	case omptarget_nvptx_inc:
+	case omptarget_nvptx_dec:
+	case omptarget_nvptx_add:
+	case omptarget_nvptx_sub:
+	case omptarget_nvptx_sub_rev:
+		return (T) 0;
+	case omptarget_nvptx_mul:
+	case omptarget_nvptx_div:
+		return (T) 1;
+	default:
+		//ASSERT(0);
+		return (T) 0;
+	}
+}
+
+template <typename T, omptarget_nvptx_BINOP_t binop>
+__inline__ __device__
+T  warpReduceSum(T val, unsigned int size) {
+  for (int offset = size/2; offset > 0; offset /= 2)
+    val = Compute<T, binop>(val, myshfldown<T>(val, offset, size));
+  return val;
+}
+
+//#define MYGSIZE warpSize
+#define MYGSIZE 32
+
+template<typename T, omptarget_nvptx_BINOP_t binop>
+__inline__ __device__ T warpBlockReduction(T inputval) {
+  	__shared__ T shared[MYGSIZE]; 
+	
+	unsigned int remainder  = blockDim.x & (MYGSIZE-1);;
+	unsigned int start_r = blockDim.x - remainder;
+  	int lane = threadIdx.x % warpSize;
+	int wid = threadIdx.x / warpSize;
+
+	if (blockDim.x < MYGSIZE) {
+		shared[threadIdx.x] = inputval;
+	} else {
+		if (threadIdx.x >= start_r) {
+			shared[threadIdx.x - start_r] = inputval;
+		} else if (threadIdx.x < MYGSIZE && threadIdx.x >= remainder) {
+			shared[threadIdx.x] = reduInitVal<T, binop>();
+		}
+	}
+	__syncthreads();
+
+	if (blockDim.x < MYGSIZE) {
+		if (threadIdx.x == 0) {
+			T val = shared[0];
+			for(unsigned i= 1; i < blockDim.x; i++) {
+				val = Compute<T, binop>(val, shared[i]);
+			}
+			return val;
+		}
+		return (T) 0;
+	}
+		
+	if (threadIdx.x < start_r) {
+		T val = warpReduceSum<T, binop>(inputval, MYGSIZE);
+		if (lane == 0) {
+			shared[wid] = Compute<T, binop>(shared[wid], val);
+		}
+	}
+	__syncthreads();
+
+	if (wid == 0) {
+		T val = warpReduceSum<T, binop>(shared[threadIdx.x], MYGSIZE);
+		if (threadIdx.x == 0) {
+//			printf("inside %d\n", val);
+			return val;
+		}
+	}
+	return (T) 0;
+}
+
+
+#define WARPBLOCK_GENREDU(_name, _dtype, _op) \
+        EXTERN _dtype __gpu_warpBlockRedu_##_name##_##_op\
+        (_dtype rhs) { \
+	return warpBlockReduction<_dtype, omptarget_nvptx_##_op>(rhs); \
+}
+
+#define WARPBLOCK_GENREDU_ALLOP(_name, _dtype) \
+	WARPBLOCK_GENREDU(_name, _dtype, add); \
+	WARPBLOCK_GENREDU(_name, _dtype, sub); \
+	WARPBLOCK_GENREDU(_name, _dtype, mul); \
+	WARPBLOCK_GENREDU(_name, _dtype, div); \
+	WARPBLOCK_GENREDU(_name, _dtype, min); \
+	WARPBLOCK_GENREDU(_name, _dtype, max); \
+	WARPBLOCK_GENREDU(_name, _dtype, andb); \
+	WARPBLOCK_GENREDU(_name, _dtype, orb); \
+	WARPBLOCK_GENREDU(_name, _dtype, xor); \
+	WARPBLOCK_GENREDU(_name, _dtype, andl); \
+	WARPBLOCK_GENREDU(_name, _dtype, orl); \
+	WARPBLOCK_GENREDU(_name, _dtype, eqv); \
+	WARPBLOCK_GENREDU(_name, _dtype, neqv); \
+	WARPBLOCK_GENREDU(_name, _dtype, shl); \
+	WARPBLOCK_GENREDU(_name, _dtype, shr); 
+	
+
+WARPBLOCK_GENREDU_ALLOP(fixed1, int8_t);
+WARPBLOCK_GENREDU_ALLOP(fixed1u, uint8_t);
+WARPBLOCK_GENREDU_ALLOP(fixed2, int16_t);
+WARPBLOCK_GENREDU_ALLOP(fixed2u, uint16_t);
+WARPBLOCK_GENREDU_ALLOP(fixed4, int32_t);
+WARPBLOCK_GENREDU_ALLOP(fixed4u, uint32_t);
+WARPBLOCK_GENREDU_ALLOP(fixed8, int64_t);
+WARPBLOCK_GENREDU_ALLOP(fixed8u, uint64_t);
+
+#define WARPBLOCK_GENREDU_ALLOP_F(_name, _dtype) \
+	WARPBLOCK_GENREDU(_name, _dtype, add); \
+	WARPBLOCK_GENREDU(_name, _dtype, sub); \
+	WARPBLOCK_GENREDU(_name, _dtype, mul); \
+	WARPBLOCK_GENREDU(_name, _dtype, div); \
+	WARPBLOCK_GENREDU(_name, _dtype, min); \
+	WARPBLOCK_GENREDU(_name, _dtype, max); 
+WARPBLOCK_GENREDU_ALLOP_F(float4, float);
+WARPBLOCK_GENREDU_ALLOP_F(float8, double);

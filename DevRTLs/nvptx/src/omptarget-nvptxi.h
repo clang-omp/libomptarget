@@ -87,7 +87,7 @@ INLINE void omptarget_nvptx_TaskDescr::CopyFromWorkDescr(omptarget_nvptx_TaskDes
 {
   Copy(workTaskDescr);
   // overrwrite specific items;
-  data.items.threadId = GetThreadIdInBlock(); // get ids from cuda
+  data.items.threadId = GetThreadIdInBlock(); // get ids from cuda (only called for 1st level)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
