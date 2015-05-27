@@ -16,7 +16,14 @@ INC_FILES := $(wildcard src/*.h)
 OBJ_FILES := $(subst src/,obj/,$(CUD_FILES:.cu=.o))
 
 NVCC := nvcc
-CFLAGS := -arch sm_35 -dc
+
+ifneq ($(OMPTARGET_NVPTX_SM),)
+  CFLAGS += -arch sm_$(OMPTARGET_NVPTX_SM)
+else
+  CFLAGS += -arch sm_35
+endif  
+CFLAGS += -dc
+
 LDFLAGS := -lcuda --lib
 
 build_cuda := $(shell which $(NVCC))
