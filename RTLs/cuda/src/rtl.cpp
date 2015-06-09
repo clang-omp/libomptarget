@@ -16,7 +16,6 @@
 #include <cstdio>
 #include <cuda.h>
 #include <cuda_runtime_api.h>
-#include <elf.h>
 #include <gelf.h>
 #include <stdio.h>
 #include <stdlib.h>
