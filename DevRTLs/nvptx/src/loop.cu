@@ -109,8 +109,7 @@ INLINE static void for_static_init(int32_t schedtype,
 	  GetOmpThreadId(gtid), schedtype, P64(chunk));
 
   // copy
-  ASSERT0(LT_FUSSY, *plower==0, "exected normalized loop");
-  T lb = 0;
+  T lb = *plower;
   T ub = *pupper;
   ST stride = *pstride;
   T entityId, numberOfEntities;
