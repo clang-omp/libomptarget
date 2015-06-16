@@ -11,8 +11,15 @@ In order to build the libraries run:
 
 -> make
 
-The makefiles are prepared to detect the host machine automatically as well as 
-the target devices by looking for the correspondent toolkit (e.g. CUDA). If a 
+or
+
+-> mkdir build
+-> cd build
+-> cmake ..
+-> make
+
+Both build systems are prepared to detect the host machine automatically as well
+as the target devices by looking for the correspondent toolkit (e.g. CUDA). If a 
 supported toolkit is detect, the makefiles will create a library for it. 
 However, it is possible that some systems require adjustments in the look-up 
 paths.   
