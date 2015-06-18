@@ -9,14 +9,18 @@ target specific runtime library.
 
 In order to build the libraries run:
 
--> make
+```
+make
+```
 
 or
 
--> mkdir build
--> cd build
--> cmake ..
--> make
+```
+mkdir build
+cd build
+cmake ..
+make
+```
 
 Both build systems are prepared to detect the host machine automatically as well
 as the target devices by looking for the correspondent toolkit (e.g. CUDA). If a 
