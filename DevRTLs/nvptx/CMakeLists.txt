@@ -33,17 +33,17 @@ if(CUDA_FOUND)
 
     message("Building NVPTX device RTL")
 
-    # Pass options to NVCC
     if(DEFINED ${OMPTARGET_NVPTX_SM})
-        set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -arch sm_${OMPTARGET_NVPTX_SM})
+        set(CUDA_ARCH -arch sm_${OMPTARGET_NVPTX_SM})
     else()
-        set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -arch sm_35)
+        set(CUDA_ARCH -arch sm_35)
     endif()
-    
+  
     set(BUILD_SHARED_LIBS OFF)
     set(CUDA_SEPARABLE_COMPILATION ON)
 
-    cuda_add_library(omptarget-nvptx ${cuda_src_files})
+    cuda_add_library(omptarget-nvptx STATIC ${cuda_src_files} 
+        OPTIONS ${CUDA_ARCH})
 
     target_link_libraries(omptarget-nvptx ${CUDA_LIBRARIES})
 

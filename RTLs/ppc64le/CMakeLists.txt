@@ -15,7 +15,7 @@ set(tmachine "ppc64le")
 set(tmachine_name "PPC64le")
 set(tmachine_libname "ppc64")
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES ${tmachine})
+if(CMAKE_SYSTEM_PROCESSOR MATCHES ${tmachine}$)
 
     message("Building " ${tmachine_name} " target RTL")
 
@@ -24,7 +24,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES ${tmachine})
 
     add_definitions(-DTARGET_NAME=${tmachine_name})
 
-    add_library(omptarget.rtl.${tmachine_libname} ../generic-64bit/src/rtl.cpp)
+    add_library(omptarget.rtl.${tmachine_libname} SHARED ../generic-64bit/src/rtl.cpp)
     target_link_libraries(omptarget.rtl.${tmachine_libname}
         ${LIB_FFI_LIBRARIES} ${LIBELF_LIBRARIES}
     )

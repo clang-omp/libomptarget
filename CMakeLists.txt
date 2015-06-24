@@ -33,9 +33,7 @@ if(CUDA_FOUND)
 endif()
 
 # Allow support for C++11 
-if(CMAKE_COMPILER_IS_GNUCXX)
-    add_definitions(-std=gnu++0x)
-endif()
+add_definitions(-std=c++11)
 
 if(CMAKE_BUILD_TYPE MATCHES Debug)
     add_definitions(-DOMPTARGET_DEBUG)

@@ -15,7 +15,7 @@ set(tmachine "x86_64")
 set(tmachine_name "x86_64")
 set(tmachine_libname "x86_64")
 
-if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin" AND CMAKE_SYSTEM_PROCESSOR MATCHES ${tmachine})
+if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin" AND CMAKE_SYSTEM_PROCESSOR MATCHES ${tmachine}$)
 
     message("Building " ${tmachine_name} " target RTL")
 
@@ -24,7 +24,7 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin" AND CMAKE_SYSTEM_PROCESSOR MATCHES ${t
 
     add_definitions(-DTARGET_NAME=${tmachine_name})
 
-    add_library(omptarget.rtl.${tmachine_libname} ../generic-64bit/src/rtl.cpp)
+    add_library(omptarget.rtl.${tmachine_libname} SHARED ../generic-64bit/src/rtl.cpp)
     target_link_libraries(omptarget.rtl.${tmachine_libname}
         ${LIB_FFI_LIBRARIES} ${LIBELF_LIBRARIES}
     )
