@@ -1,2 +1,26 @@
-lib
+#==============================================================================#
+# File extensions to be ignored anywhere in the tree.
+#==============================================================================#
+# Temp files created by most text editors.
+*~
+# Merge files created by git.
+*.orig
+# Byte compiled python modules.
+*.pyc
+# vim swap files
+.*.sw?
+.sw?
+#OS X specific files.
+.DS_store
+# IDE config files
+*.user
+*.sublime-project
+*.sublime-workspace
+
+#==============================================================================#
+# Explicit files to ignore.
+#==============================================================================#
+# Build related folder
+build*/
+lib/
 obj
