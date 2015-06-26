@@ -18,7 +18,11 @@ OBJ_FILES := $(subst src/,obj/,$(CUD_FILES:.cu=.o))
 NVCC := nvcc
 
 ifneq ($(OMPTARGET_NVPTX_SM),)
-  CFLAGS += -arch sm_$(OMPTARGET_NVPTX_SM)
+  _comma:= ,
+  _empty:=
+  _space:= $(_empty) $(empty)
+  CFLAGS += $(foreach sm,$(subst $(_comma),$(_space),$(OMPTARGET_NVPTX_SM)), \
+  		-gencode arch=compute_$(sm),code=sm_$(sm))
 else
   CFLAGS += -arch sm_35
 endif  
@@ -28,9 +32,7 @@ LDFLAGS := -lcuda --lib
 
 build_cuda := $(shell which $(NVCC))
 
-ifeq ($(OMPTARGET_NVPTX_DEBUG), 1)
-  CFLAGS += -DOMPTARGET_NVPTX_DEBUG=4 -g --ptxas-options=-v
-else ifeq ($(OMPTARGET_NVPTX_DEBUG), 2)
+ifdef OMPTARGET_NVPTX_DEBUG
   CFLAGS += -DOMPTARGET_NVPTX_DEBUG=-1 -g --ptxas-options=-v
 endif
 

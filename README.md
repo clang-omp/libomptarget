@@ -80,11 +80,12 @@ execution.
 The current implementation includes a library for:
   - nvptx: library written in CUDA for Nvidia GPUs. Tested with CUDA compilation 
   tools V7.0.27. The CUDA architecture can be set using cmake by setting 
-  OMPTARGET\_NVPTX\_SM to a comma seperated list of target architectures. For 
+  OMPTARGET\_NVPTX\_SM to a comma separated list of target architectures. For 
   example, to compile for sm\_30 and sm\_35 one can define 
-  `-DOMPTARGET_NVPTX_SM=30,35` when calling cmake. In order to use this library 
-  with Clang the user has to set LIBRARY_PATH to point to ./lib so that Clang 
-  passes the right information to the target linker.
+  `-DOMPTARGET_NVPTX_SM=30,35` when calling cmake. If not using cmake the same 
+  goal can be achieved by passing `OMPTARGET_NVPTX_SM=30,35` to make. In order 
+  to use this library with Clang the user has to set LIBRARY_PATH to point to 
+  ./lib so that Clang passes the right information to the target linker.
        
 For powerpc64, powerpc64le and x86_64 devices, existing host runtime libraries 
 (e.g. openmp.llvm.org) can be used for when these devices are used as OpenMP 
