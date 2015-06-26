@@ -17,21 +17,29 @@ set(tmachine_libname "ppc64")
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES ${tmachine}$)
 
-    message("Building " ${tmachine_name} " target RTL")
+    find_package(LibFFI QUIET)
 
-    find_package(LibFFI REQUIRED)
-    include_directories(${LIB_FFI_INCLUDE_DIR})
+    if(LIB_FFI_LIBRARIES)
 
-    add_definitions(-DTARGET_NAME=${tmachine_name})
+        message("Building " ${tmachine_name} " target RTL")
 
-    add_library(omptarget.rtl.${tmachine_libname} SHARED ../generic-64bit/src/rtl.cpp)
-    target_link_libraries(omptarget.rtl.${tmachine_libname}
-        ${LIB_FFI_LIBRARIES} ${LIBELF_LIBRARIES}
-    )
+        include_directories(${LIB_FFI_INCLUDE_DIR})
+
+        add_definitions(-DTARGET_NAME=${tmachine_name})
+
+        add_library(omptarget.rtl.${tmachine_libname} SHARED ../generic-64bit/src/rtl.cpp)
+        target_link_libraries(omptarget.rtl.${tmachine_libname}
+            ${LIB_FFI_LIBRARIES} ${LIBELF_LIBRARIES}
+        )
+
+    else()
+
+        message("LibFFI not found in system: not building " ${tmachine_name} " RTL")
+
+    endif()
 
 else()
 
     message(${tmachine_name} " not found in system: not building " ${tmachine_name} " RTL")
 
 endif()
-
