@@ -33,8 +33,11 @@ if(CUDA_FOUND)
 
     message("Building NVPTX device RTL")
 
-    if(DEFINED ${OMPTARGET_NVPTX_SM})
-        set(CUDA_ARCH -arch sm_${OMPTARGET_NVPTX_SM})
+    if(DEFINED OMPTARGET_NVPTX_SM)
+        string(REPLACE "," ";" omptarget_nvptx_sm_list ${OMPTARGET_NVPTX_SM})
+        foreach(sm ${omptarget_nvptx_sm_list})
+           set(CUDA_ARCH ${CUDA_ARCH} -gencode arch=compute_${sm},code=sm_${sm})
+        endforeach()
     else()
         set(CUDA_ARCH -arch sm_35)
     endif()
