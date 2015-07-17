@@ -515,35 +515,11 @@ EXTERN void __tgt_register_lib(__tgt_bin_desc *desc){
   DP("Done register entries!\n");
 }
 
-/// creates host to the target data mapping, store it in the
-/// libtarget.so internal structure (an entry in a stack of data maps)
-/// and passes the data to the device;
-EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num, 
+
+/// Internal function to do the mapping and transfer the data to the device
+static void target_data_begin(DeviceTy & Device, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
 {
-  DP("Entering data begin region for device %d with %d mappings\n", 
-    device_id, arg_num);
-
-  // No devices available?
-  if (device_id == OFFLOAD_DEVICE_DEFAULT) {
-    device_id = omp_get_default_device();
-    DP("Use default device id %d\n", device_id);
-  }
-  if (Devices.size() <= (size_t)device_id){
-    DP("Device ID  %d does not have a matching RTL.\n", device_id);
-    return;
-  }
-
-  // Get device info
-  DeviceTy & Device = Devices[device_id];
-  // Init the device if not done before
-  if (!Device.IsInit){
-    if (Device.init() != OFFLOAD_SUCCESS) {
-      DP("failed to init device %d\n", device_id);
-      return;
-    }
-  }
-
   // process each input
   for(int32_t i=0; i<arg_num; ++i){
     void *HstPtrBegin = args[i];
@@ -586,18 +562,19 @@ EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
   }
 }
 
-
-/// passes data from the target, release target memory and destroys
-/// the host-target mapping (top entry from the stack of data maps)
-/// created by the last __tgt_target_data_begin
-EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num, 
+/// creates host to the target data mapping, store it in the
+/// libtarget.so internal structure (an entry in a stack of data maps)
+/// and passes the data to the device;
+EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
 {
-  DP("Entering data end region with %d mappings\n", arg_num);
+  DP("Entering data begin region for device %d with %d mappings\n",
+    device_id, arg_num);
 
   // No devices available?
   if (device_id == OFFLOAD_DEVICE_DEFAULT) {
     device_id = omp_get_default_device();
+    DP("Use default device id %d\n", device_id);
   }
   if (Devices.size() <= (size_t)device_id){
     DP("Device ID  %d does not have a matching RTL.\n", device_id);
@@ -606,11 +583,22 @@ EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num,
 
   // Get device info
   DeviceTy & Device = Devices[device_id];
+  // Init the device if not done before
   if (!Device.IsInit) {
-    DP("uninit device: ignore");
-    return;
+    if (Device.init() != OFFLOAD_SUCCESS) {
+      DP("failed to init device %d\n", device_id);
+      return;
+    }
   }
 
+  target_data_begin(Device, arg_num, args_base, args, arg_sizes, arg_types);
+}
+
+
+/// Internal function to undo the mapping and retrieve the data from the device
+static void target_data_end(DeviceTy & Device, int32_t arg_num,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
+{
   // process each input
   for(int32_t i=0; i<arg_num; ++i){
     void *HstPtrBegin = args[i];
@@ -639,6 +627,32 @@ EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num,
       Device.deallocTgtPtr(HstPtrBegin, arg_sizes[i], ForceDelete);
     }
   }
+}
+
+/// passes data from the target, release target memory and destroys
+/// the host-target mapping (top entry from the stack of data maps)
+/// created by the last __tgt_target_data_begin
+EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num, 
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
+{
+  DP("Entering data end region with %d mappings\n", arg_num);
+
+  // No devices available?
+  if (device_id == OFFLOAD_DEVICE_DEFAULT) {
+    device_id = omp_get_default_device();
+  }
+  if (Devices.size() <= (size_t)device_id){
+    DP("Device ID  %d does not have a matching RTL.\n", device_id);
+    return;
+  }
+
+  DeviceTy & Device = Devices[device_id];
+  if (!Device.IsInit) {
+    DP("uninit device: ignore");
+    return;
+  }
+
+  target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types);
 }
 
 /// passes data to/from the target
@@ -853,8 +867,7 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
   }
 
   //Move data to device
-  __tgt_target_data_begin(device_id, arg_num, args_base, args, 
-    arg_sizes, arg_types);
+  target_data_begin(Device, arg_num, args_base, args, arg_sizes, arg_types);
 
   std::vector<void*> tgt_args;
 
@@ -899,8 +912,7 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
     return OFFLOAD_FAIL;
 
   //Move data from device
-  __tgt_target_data_end(device_id, arg_num, args_base, args, 
-    arg_sizes, arg_types);  
+  target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types);
   return OFFLOAD_SUCCESS;
 }
 
