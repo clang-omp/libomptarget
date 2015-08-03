@@ -33,18 +33,13 @@
 #define DP(...) DEBUGP("Target " GETNAME(TARGET_NAME) " RTL",__VA_ARGS__)
 
 // Utility for retrieving and printing CUDA error string
-// FIXME: Unfortunately, the error string feature does not work on some machines
-// so it is deactivated for the moment.
 #ifdef CUDA_ERROR_REPORT
-#define CUDA_ERR_STRING(err)        \
-    DP("CUDA error is: %d (see cuda.h)\n", err)
-
-//#define CUDA_ERR_STRING(err) {        \
-//    DP("CUDA error is: %s\n", *errStr);     \
-//    const char ** errStr;       \
-//    cuGetErrorString (err, errStr);     \
-//    DP("CUDA error is: %s\n", *errStr);     \
-//}
+#define CUDA_ERR_STRING(err)               \
+    do {                                   \
+        const char* errStr;                \
+        cuGetErrorString (err, &errStr);   \
+        DP("CUDA error is: %s\n", errStr); \
+    } while (0)
 #else
 #define CUDA_ERR_STRING(err) {}
 #endif
