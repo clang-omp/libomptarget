@@ -515,6 +515,12 @@ EXTERN void __tgt_register_lib(__tgt_bin_desc *desc){
   DP("Done register entries!\n");
 }
 
+////////////////////////////////////////////////////////////////////////////////
+/// unloads a target shared library
+EXTERN void __tgt_unregister_lib(__tgt_bin_desc *desc){
+  DP("Unloading target library!\n");
+  return;
+}
 
 /// Internal function to do the mapping and transfer the data to the device
 static void target_data_begin(DeviceTy & Device, int32_t arg_num,
@@ -560,6 +566,14 @@ static void target_data_begin(DeviceTy & Device, int32_t arg_num,
       Device.data_submit(Pointer_TgtPtrBegin, &TgrPtrBase_Value, sizeof(void*));
     }
   }
+}
+
+EXTERN void __tgt_target_data_begin_nowait(int32_t device_id, int32_t arg_num,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
+{
+  __tgt_target_data_begin(device_id, arg_num, args_base, args, arg_sizes,
+    arg_types);
 }
 
 /// creates host to the target data mapping, store it in the
@@ -653,6 +667,15 @@ EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num,
   }
 
   target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types);
+
+}
+
+EXTERN void __tgt_target_data_end_nowait(int32_t device_id, int32_t arg_num,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
+{
+  __tgt_target_data_end(device_id, arg_num, args_base, args, arg_sizes,
+    arg_types);
 }
 
 /// passes data to/from the target
@@ -694,6 +717,14 @@ EXTERN void __tgt_target_data_update(int32_t device_id, int32_t arg_num,
       Device.data_submit(TgtPtrBegin, HstPtrBegin, arg_sizes[i]);
     }
   }
+}
+
+EXTERN void __tgt_target_data_update_nowait(int32_t device_id, int32_t arg_num,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
+{
+  __tgt_target_data_update(device_id, arg_num, args_base, args, arg_sizes,
+    arg_types);
 }
 
 /// performs the same actions as data_begin in case arg_num is
@@ -923,6 +954,14 @@ EXTERN int __tgt_target(int32_t device_id, void *host_ptr, int32_t arg_num,
     arg_sizes, arg_types, 0, 0, false /*team*/, false /*recursive*/);
 }
 
+EXTERN int __tgt_target_nowait(int32_t device_id, void *host_ptr, int32_t arg_num,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
+{
+  return __tgt_target(device_id, host_ptr, arg_num, args_base, args, arg_sizes,
+    arg_types);
+}
+
 EXTERN int __tgt_target_teams(int32_t device_id, void *host_ptr, int32_t arg_num, 
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
   int32_t team_num, int32_t thread_limit) 
@@ -930,5 +969,29 @@ EXTERN int __tgt_target_teams(int32_t device_id, void *host_ptr, int32_t arg_num
   return target(device_id, host_ptr, arg_num, args_base, args, 
     arg_sizes, arg_types, team_num, thread_limit, 
     true /*team*/, false /*recursive*/);
+}
+
+EXTERN int __tgt_target_teams_nowait(int32_t device_id, void *host_ptr, int32_t arg_num,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  int32_t team_num, int32_t thread_limit,
+  int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
+{
+  return __tgt_target_teams(device_id, host_ptr, arg_num, args_base, args,
+    arg_sizes, arg_types, team_num, thread_limit);
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+// temporary for debugging (matching the ones in omptarget-nvptx
+// REMOVE XXXXXX (here and in omptarget-nvptx)
+
+EXTERN void __kmpc_kernel_print(char *title) 
+{
+  DP(" %s\n", title);
+}
+
+EXTERN void __kmpc_kernel_print_int8(char *title, int64_t data) 
+{
+  DP(" %s val=%lld\n", title, (long long)data);
 }
 

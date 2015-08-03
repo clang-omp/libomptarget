@@ -15,9 +15,60 @@
 #include <complex.h>
 #include "omptarget-nvptx.h"
 
+//EXTERN int32_t __gpu__warpBlockRedu_fixed4_add(int32_t);
+
+EXTERN void omp_reduction_op_gpu(char *, char *);
+
+
+//cannot implement atomic_start and atomic_end for GPU. Report runtime error
+EXTERN void __kmpc_atomic_start() {
+		printf("__kmpc_atomic_start not supported\n"); \
+		asm("trap;"); \
+		return; \
+}
+
+EXTERN void __kmpc_atomic_end() {
+		printf("__kmpc_atomic_end not supported\n"); \
+		asm("trap;"); \
+		return; \
+}
+
+//EXTERN  kmp_ReductFctPtr *gpu_callback = (kmp_ReductFctPtr *)omp_reduction_op_gpu;
+
 EXTERN 
-int32_t __kmpc_reduce(kmp_Indent *loc, int32_t global_tid, int32_t num_vars, size_t reduce_size, void *reduce_data, kmp_ReductFctPtr *reductFct, kmp_CriticalName *lck) {
-	return 2;
+int32_t __gpu_block_reduce(){
+        if (omp_get_num_threads() != blockDim.x)
+		return 0;
+	unsigned tnum = __ballot(1);
+	if (tnum != (~0x0)) { //assume swapSize is 32
+		return 0;
+	}
+	return 1;
+}
+
+EXTERN 
+int32_t __kmpc_reduce_gpu(kmp_Indent *loc, int32_t global_tid, int32_t num_vars, size_t reduce_size, void *reduce_data, kmp_ReductFctPtr *reductFct, kmp_CriticalName *lck) {
+  int globalThreadId = GetGlobalThreadId();
+  omptarget_nvptx_TaskDescr *currTaskDescr = getMyTopTaskDescriptor(globalThreadId);
+	int numthread;
+  	if (currTaskDescr->IsParallelConstruct()) {
+		numthread = omp_get_num_threads();
+	} else {
+		numthread = omp_get_num_teams();
+	}
+	
+
+	if (numthread == 1)
+                return 1;
+        else if (!__gpu_block_reduce())
+                return 2;
+	else {
+		if (threadIdx.x == 0)
+			return 1;
+		else
+			return 0;
+	}
+//	return 2;
 	/**
 	 * Only when all the threads in a block are doing reduction,
 	 * the warpBlockRedu is used. Otherwise atomic.
@@ -35,11 +86,10 @@ int32_t __kmpc_reduce(kmp_Indent *loc, int32_t global_tid, int32_t num_vars, siz
 	if (tnum != (~0x0)) { //assume swapSize is 32
 		return 2;
 	}
-#endif
 	
 #if 0
 	if (threadIdx.x == 0) {
-		if ((void *)reductFct != (void *)omp_reduction_op) {
+		if ((void *)reductFct != (void *)omp_reduction_op_gpu) {
 			printf("function pointer value is not correct\n");
 		} else {
 			printf("function pointer value is correct\n");
@@ -47,9 +97,13 @@ int32_t __kmpc_reduce(kmp_Indent *loc, int32_t global_tid, int32_t num_vars, siz
 	}
 #endif
 
-#if 0
+	//printf("function pointer %p %d %p\n", reductFct, reduce_size, omp_reduction_op_gpu);
+	if (reduce_size == 0) {
 	(*reductFct)((char*)reduce_data, (char*)reduce_data);
-	//omp_reduction_op((char*)reduce_data, (char*)reduce_data);
+	} else {
+	//omp_reduction_op_gpu((char*)reduce_data, (char*)reduce_data);
+	 (*gpu_callback)((char*)reduce_data, (char*)reduce_data);
+	}
 	
 	//int **myp = (int **) reduce_data;
 	// the results are with thread 0. Reduce to the shared one
@@ -64,8 +118,31 @@ int32_t __kmpc_reduce(kmp_Indent *loc, int32_t global_tid, int32_t num_vars, siz
 }
 
 EXTERN 
+int32_t __kmpc_reduce(kmp_Indent *loc, int32_t global_tid, int32_t num_vars, size_t reduce_size, void *reduce_data, kmp_ReductFctPtr *reductFct, kmp_CriticalName *lck) {
+	return __kmpc_reduce_gpu(loc, global_tid, num_vars, reduce_size, reduce_data, reductFct, lck);
+}
+
+EXTERN 
 int32_t __kmpc_reduce_nowait(kmp_Indent *loc, int32_t global_tid, int32_t num_vars, size_t reduce_size, void *reduce_data, kmp_ReductFctPtr *reductFct, kmp_CriticalName *lck) {
-	return 2;
+  int globalThreadId = GetGlobalThreadId();
+  omptarget_nvptx_TaskDescr *currTaskDescr = getMyTopTaskDescriptor(globalThreadId);
+	int numthread;
+  	if (currTaskDescr->IsParallelConstruct()) {
+		numthread = omp_get_num_threads();
+	} else {
+		numthread = omp_get_num_teams();
+	}
+
+	if (numthread == 1)
+                return 1;
+        else if (!__gpu_block_reduce())
+                return 2;
+	else {
+		if (threadIdx.x == 0)
+			return 1;
+		else
+			return 0;
+	}
 
 	// Notice: as above, uncomment if 0 once this code below is ready for shipping
 #if 0
@@ -253,6 +330,85 @@ INLINE __device__ float complex atomicCAS(float complex *_addr, float complex _c
 	if (flag) return newvalue; \
 	else return oldvalue ; \
 }
+
+
+INLINE __device__  void dc_add(double complex *lhs, double complex rhs) {
+	double *ptrl = (double *)lhs;
+	double *ptrr = (double *) &rhs;
+	ptrl[0] += ptrr[0];
+	ptrl[1] += ptrr[1];
+}
+
+INLINE __device__  void dc_sub(double complex *lhs, double complex rhs) {
+	double *ptrl = (double *)lhs;
+	double *ptrr = (double *) &rhs;
+	ptrl[0] -= ptrr[0];
+	ptrl[1] -= ptrr[1];
+}
+
+INLINE __device__  void dc_mul(double complex *lhs, double complex rhs) {
+	double *ptrl = (double *)lhs;
+	double *ptrr = (double *) &rhs;
+	double r1 = ptrl[0], r2 = ptrr[0];
+	double i1 = ptrl[1], i2 = ptrr[1];
+	ptrl[0] = r1*r2-i1*i2;
+	ptrl[1] = r1*i2+r2*i1;
+}
+
+INLINE __device__  void dc_div(double complex *lhs, double complex rhs) {
+	double *ptrl = (double *)lhs;
+	double *ptrr = (double *) &rhs;
+	double r1 = ptrl[0], r2 = ptrr[0];
+	double i1 = ptrl[1], i2 = ptrr[1];
+	ptrl[0] = (r1*r2+i1*i2)/(r2*r2+i2*i2);
+	ptrl[1] = (i1*r2-r1*i2)/(r2*r2+i2*i2);
+}
+
+#define ATOMIC_GENOP_DC(_op) \
+        EXTERN void __kmpc_atomic_cmplx8_##_op\
+        (kmp_Indent *id_ref, int32_t gtid, double _Complex * lhs, double _Complex rhs) { \
+		printf("double complex atomic opertion not supported\n"); \
+		asm("trap;"); \
+		return; \
+	}\
+	EXTERN double _Complex __gpu_warpBlockRedu_cmplx8_##_op(double _Complex rhs) { \
+	__shared__ double _Complex lhs; \
+	if (threadIdx.x == 0 ) \
+		lhs = rhs; \
+	__syncthreads(); \
+	for (int i= 1; i<blockDim.x; i++)  { \
+		if (threadIdx.x == i) { \
+			dc_##_op(&lhs, rhs); \
+		}\
+		__syncthreads(); \
+	}\
+	return lhs; \
+}
+
+//implementation with shared
+#define ATOMIC_GENOP_DC_obsolete(_op) \
+        EXTERN void __kmpc_atomic_cmplx16_##_op\
+        (kmp_Indent *id_ref, int32_t gtid, double _Complex * lhs, double _Complex rhs) { \
+	__shared__ unsigned int  stepinblock; \
+	unsigned tnum = __ballot(1); \
+	if (tnum != (~0x0)) {  \
+		return ; \
+	} \
+	if (threadIdx.x == 0)  stepinblock = 0; \
+	__syncthreads(); \
+	while (stepinblock < blockDim.x) { \
+		if (threadIdx.x == stepinblock) { \
+		dc_##_op(lhs, rhs); \
+		stepinblock ++ ; \
+		}\
+		__syncthreads(); \
+	} \
+} 
+
+ATOMIC_GENOP_DC(add);
+ATOMIC_GENOP_DC(sub);
+ATOMIC_GENOP_DC(mul);
+ATOMIC_GENOP_DC(div);
 
 
 INLINE __device__  uint64_t fc_add(float r1, float i1, float r2, float i2) {
@@ -1022,3 +1178,61 @@ WARPBLOCK_GENREDU_ALLOP(fixed8u, uint64_t);
 	WARPBLOCK_GENREDU(_name, _dtype, max); 
 WARPBLOCK_GENREDU_ALLOP_F(float4, float);
 WARPBLOCK_GENREDU_ALLOP_F(float8, double);
+
+
+/**************************************
+* runtime support for array reduction *
+***************************************/
+
+#define ARRAYATOMIC_GENOP(_name, _dtype, _op) \
+        EXTERN void __array_atomic_##_name##_##_op\
+        (kmp_Indent *id_ref, int32_t gtid, _dtype * lhs, _dtype *rhs, int n) { \
+	PRINT(LD_LOOP, "Reduction: thead %d\n", gtid); \
+	for(int i = 0; i < n; i++) { \
+        	__kmpc_atomic_##_name##_##_op(id_ref, gtid, lhs+i, rhs[i]);\
+	 }\
+	}\
+        EXTERN void __gpu_array_warpBlockRedu_##_name##_##_op\
+	(_dtype *ldata, int n) {\
+	for(int i = 0; i < n; i++) { \
+		ldata[i] = __gpu_warpBlockRedu_##_name##_##_op(ldata[i]); \
+	} \
+} 
+
+#define ARRAY_GEN_ALLOP_INTEGER(_name, _tname, _optype) \
+	_name(_tname, _optype, add) ;\
+	_name(_tname, _optype, sub) ;\
+	_name(_tname, _optype, mul) ;\
+	_name(_tname, _optype, div) ;\
+	_name(_tname, _optype, min) ;\
+	_name(_tname, _optype, max) ;\
+	_name(_tname, _optype, andb) ;\
+	_name(_tname, _optype, orb) ;\
+	_name(_tname, _optype, xor) ;\
+	_name(_tname, _optype, shl) ;\
+	_name(_tname, _optype, shr) ;\
+	_name(_tname, _optype, andl) ;\
+	_name(_tname, _optype, orl) ; \
+	_name(_tname, _optype, eqv) ; \
+	_name(_tname, _optype, neqv) ; \
+
+#define ARRAY_GEN_ALLOP_FLOAT(_name, _tname, _optype) \
+	_name(_tname, _optype, add) ;\
+	_name(_tname, _optype, sub) ;\
+	_name(_tname, _optype, mul) ;\
+	_name(_tname, _optype, div) ;\
+	_name(_tname, _optype, min) ;\
+	_name(_tname, _optype, max) ;
+
+
+//ARRAYATOMIC_GENOP(fixed4, int32_t, add);
+
+#if 1
+ARRAY_GEN_ALLOP_INTEGER(ARRAYATOMIC_GENOP, fixed1, int8_t);
+ARRAY_GEN_ALLOP_INTEGER(ARRAYATOMIC_GENOP, fixed2, int16_t);
+ARRAY_GEN_ALLOP_INTEGER(ARRAYATOMIC_GENOP, fixed4, int32_t);
+ARRAY_GEN_ALLOP_INTEGER(ARRAYATOMIC_GENOP, fixed8, int64_t);
+ARRAY_GEN_ALLOP_FLOAT(ARRAYATOMIC_GENOP,float4, float);
+ARRAY_GEN_ALLOP_FLOAT(ARRAYATOMIC_GENOP,float8, double);
+#endif
+

@@ -100,6 +100,7 @@ EXTERN int32_t __kmpc_omp_task_with_deps(kmp_Indent *loc,
   omptarget_nvptx_threadPrivateContext.SetTopLevelTaskDescr(gtid, parentTaskDescr);
   // 5. free
   SafeFree(newExplicitTaskDescr, "explicit task descriptor");
+  return 0;
 }
 
 EXTERN void __kmpc_omp_task_begin_if0(kmp_Indent *loc, 

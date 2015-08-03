@@ -59,3 +59,4 @@ obj/%.o: src/%.cu $(INC_FILES)
 clean:
 	rm -rf obj lib
 	rm -f src/*~
+

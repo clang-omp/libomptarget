@@ -64,7 +64,8 @@ EXTERN int omp_get_max_threads(void)
 EXTERN int omp_get_thread_limit(void)
 {
   // per contention group.. meaning threads in current team
-  int rc = GetNumberOfProcsInTeam();
+  omptarget_nvptx_TaskDescr *currTaskDescr = getMyTopTaskDescriptor();
+  int rc = currTaskDescr->ThreadLimit();
   PRINT(LD_IO, "call omp_get_thread_limit() return %d\n", rc);
   return rc;
 }

@@ -71,6 +71,7 @@ class omptarget_nvptx_TaskDescr {
   INLINE int  IsTaskConstruct() { return ! IsParallelConstruct(); }
   // methods for other fields
   INLINE uint16_t & NThreads() { return data.items.nthreads; }
+  INLINE uint16_t & ThreadLimit() { return data.items.threadlimit; }
   INLINE uint16_t & ThreadId() { return data.items.threadId; }
   INLINE uint16_t & ThreadsInTeam() { return data.items.threadsInTeam; }
   INLINE uint64_t & RuntimeChunkSize() { return data.items.runtimeChunkSize; }
@@ -103,6 +104,7 @@ class omptarget_nvptx_TaskDescr {
       uint8_t  flags; // 6 bit used (see flag above)
       uint8_t  unused; 
       uint16_t nthreads; // thread num for subsequent parallel regions
+      uint16_t threadlimit; // thread limit ICV
       uint16_t threadId; // thread id
       uint16_t threadsInTeam; // threads in current team
       uint64_t runtimeChunkSize; // runtime chunk size

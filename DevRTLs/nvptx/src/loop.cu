@@ -124,13 +124,13 @@ INLINE static void for_static_init(int32_t schedtype,
 	        ForStaticChunk(lb, ub, stride, chunk, entityId, numberOfEntities);
 	        break;
         }
-      }
+      } // note: if chunk <=0, use nochunk
 	  case kmp_sched_static_nochunk :
       {
         entityId = GetOmpThreadId(gtid);
         numberOfEntities = GetNumberOfOmpThreads(gtid);
   	    ForStaticNoChunk(lb, ub, stride, chunk, entityId, numberOfEntities);
-	    break;
+  	    break;
       }
     case kmp_sched_distr_static_chunk :
       {
@@ -138,8 +138,8 @@ INLINE static void for_static_init(int32_t schedtype,
           entityId = GetOmpTeamId();
           numberOfEntities = GetNumberOfOmpTeams();
   	      ForStaticChunk(lb, ub, stride, chunk, entityId, numberOfEntities);
-	        break;
-        }
+          break;
+        } // note: if chunk <=0, use nochunk
       }
   	case kmp_sched_distr_static_nochunk :
       {

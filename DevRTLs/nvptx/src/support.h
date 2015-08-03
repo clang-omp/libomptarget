@@ -55,9 +55,9 @@ INLINE int GetNumberOfBlocksInKernel();
 
 
 // safe alloc and free
-INLINE void *SafeMalloc(size_t size, char *msg); // check if success
-INLINE void *SafeFree(void *ptr, char *msg); 
+INLINE void *SafeMalloc(size_t size, const char *msg); // check if success
+INLINE void *SafeFree(void *ptr, const char *msg); 
 // pad to a alignment (power of 2 only)
 INLINE unsigned long PadBytes(unsigned long size, unsigned long alignment);
-#define ADD_BYTES(_addr, _bytes) ((void *)((char *)((void *)(_addr)))+(_bytes))
-#define SUB_BYTES(_addr, _bytes) ((void *)((char *)((void *)(_addr)))-(_bytes))
+#define ADD_BYTES(_addr, _bytes) ((void *)((char *)((void *)(_addr))+(_bytes)))
+#define SUB_BYTES(_addr, _bytes) ((void *)((char *)((void *)(_addr))-(_bytes)))

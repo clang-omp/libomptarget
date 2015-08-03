@@ -26,7 +26,7 @@ __device__ omptarget_nvptx_GlobalICV omptarget_nvptx_globalICV;
 ////////////////////////////////////////////////////////////////////////////////
 
 
-EXTERN void __kmpc_kernel_init()
+EXTERN void __kmpc_kernel_init(int ThreadLimit)
 {
   PRINT(LD_IO, "call to __kmpc_kernel_init with version %f\n", OMPTARGET_NVPTX_VERSION);
   // init thread private
@@ -48,12 +48,13 @@ EXTERN void __kmpc_kernel_init()
     omptarget_nvptx_threadPrivateContext.SetTopLevelTaskDescr(globalThreadId, 
       currTeamDescr.LevelZeroTaskDescr());
     
-    // set number of threads in team to started value
+    // set number of threads and thread limit in team to started value
     int globalThreadId = GetGlobalThreadId();
     omptarget_nvptx_TaskDescr *currTaskDescr =
         omptarget_nvptx_threadPrivateContext.GetTopLevelTaskDescr(
             globalThreadId);
     currTaskDescr->NThreads() = GetNumberOfThreadsInBlock();
+    currTaskDescr->ThreadLimit() = ThreadLimit;
   }
 }
 

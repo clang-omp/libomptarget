@@ -17,9 +17,11 @@
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 #include <gelf.h>
+#include <list>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
+#include <string.h>
 #include <vector>
 
 #include "omptarget.h"
@@ -67,6 +69,26 @@ struct FuncOrGblEntryTy{
   __tgt_target_table Table;
   std::vector<__tgt_offload_entry> Entries;
 };
+
+/// Use a single entity to encode a kernel and a set of flags
+struct KernelTy{
+  CUfunction Func;
+  int SimdInfo;
+
+  // keep track of cuda pointer to write to it when thread_limit value
+  // changes (check against last value written to ThreadLimit
+  CUdeviceptr ThreadLimitPtr;
+  int ThreadLimit;
+
+  KernelTy(CUfunction _Func, int _SimdInfo, CUdeviceptr _ThreadLimitPtr)
+    : Func(_Func), SimdInfo(_SimdInfo), ThreadLimitPtr(_ThreadLimitPtr) {
+    ThreadLimit = 0; //default (0) signals that it was not initialized
+  };
+};
+
+/// List that contains all the kernels.
+/// FIXME: we may need this to be per device and per library.
+std::list<KernelTy> KernelsList;
 
 /// Class containing all the device information
 class RTLDeviceInfoTy{
@@ -345,10 +367,64 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id, __tgt_device_image 
 
     DP("Entry point %ld maps to %s (%016lx)\n",e-HostBegin,e->name,(Elf64_Addr)fun);
 
-    __tgt_offload_entry entry = *e;
-    entry.addr = (void*)fun;
-    DeviceInfo.addOffloadEntry(device_id, entry);
+    // default value
+    int8_t SimdInfoVal = 1;
 
+    // obtain and save simd_info value for target region
+    const char suffix[] = "_simd_info";
+    char * SimdInfoName = (char *) malloc((strlen(e->name)+strlen(suffix))*
+        sizeof(char));
+    sprintf(SimdInfoName, "%s%s", e->name, suffix);
+
+    CUdeviceptr SimdInfoPtr;
+    size_t cusize;
+    err = cuModuleGetGlobal(&SimdInfoPtr,&cusize,cumod,SimdInfoName);
+    if (err == CUDA_SUCCESS) {
+      if ((int32_t)cusize != sizeof(int8_t)){
+        DP("loading global simd_info '%s' - size mismatch (%lld != %lld)\n", SimdInfoName, (unsigned long long)cusize,(unsigned long long)sizeof(int8_t));
+        CUDA_ERR_STRING (err);
+        return NULL;
+      }
+
+      err = cuMemcpyDtoH(&SimdInfoVal,(CUdeviceptr)SimdInfoPtr,cusize);
+      if (err != CUDA_SUCCESS)
+      {
+        DP("Error when copying data from device to host. Pointers: "
+            "host = 0x%016lx, device = 0x%016lx, size = %lld\n",(Elf64_Addr)&SimdInfoVal, (Elf64_Addr)SimdInfoPtr,(unsigned long long)cusize);
+        CUDA_ERR_STRING (err);
+        return NULL;
+      }
+      if (SimdInfoVal < 1) {
+        DP("Error wrong simd_info value specified in cubin file: %d\n", SimdInfoVal);
+        return NULL;
+      }
+    }
+
+    // obtain cuda pointer to global tracking thread limit
+    const char SuffixTL[] = "_thread_limit";
+    char * ThreadLimitName = (char *) malloc((strlen(e->name)+strlen(SuffixTL))*
+        sizeof(char));
+    sprintf(ThreadLimitName, "%s%s", e->name, SuffixTL);
+
+    CUdeviceptr ThreadLimitPtr;
+    err = cuModuleGetGlobal(&ThreadLimitPtr,&cusize,cumod,ThreadLimitName);
+    if (err != CUDA_SUCCESS) {
+      DP("retrieving pointer for %s global\n", ThreadLimitName);
+      CUDA_ERR_STRING (err);
+      return NULL;
+    }
+    if ((int32_t)cusize != sizeof(int32_t)) {
+      DP("loading global thread_limit '%s' - size mismatch (%lld != %lld)\n", ThreadLimitName, (unsigned long long)cusize,(unsigned long long)sizeof(int32_t));
+      CUDA_ERR_STRING (err);
+      return NULL;
+    }
+
+    // encode function and kernel
+    KernelsList.push_back(KernelTy(fun, SimdInfoVal, ThreadLimitPtr));
+
+    __tgt_offload_entry entry = *e;
+    entry.addr = (void*)&KernelsList.back();
+    DeviceInfo.addOffloadEntry(device_id, entry);
   }
 
   return DeviceInfo.getOffloadEntriesTable(device_id);
@@ -461,16 +537,40 @@ int32_t __tgt_rtl_run_target_team_region(int32_t device_id,
   for(int32_t i=0; i<arg_num; ++i)
     args[i] = &tgt_args[i];
 
-  int threadsPerBlock = thread_limit>0 ? thread_limit : 
-    DeviceInfo.ThreadsPerBlock[device_id];
+  KernelTy *KernelInfo = (KernelTy*)tgt_entry_ptr;
+
+  int cudaThreadsPerBlock = (thread_limit<=0 ||
+    thread_limit*KernelInfo->SimdInfo > DeviceInfo.ThreadsPerBlock[device_id])?
+        DeviceInfo.ThreadsPerBlock[device_id] :
+        thread_limit*KernelInfo->SimdInfo;
+
+  // update thread limit content in gpu memory if un-initialized or changed
+  if (KernelInfo->ThreadLimit == 0 || KernelInfo->ThreadLimit != thread_limit) {
+    // always capped by maximum number of threads in a block: even if 1 OMP thread
+    // is 1 independent CUDA thread, we may have up to max block size OMP threads
+    // if the user request thread_limit(tl) with tl > max block size, we
+    // only start max block size CUDA threads
+    if (thread_limit > DeviceInfo.ThreadsPerBlock[device_id])
+    thread_limit = DeviceInfo.ThreadsPerBlock[device_id];
+
+    KernelInfo->ThreadLimit = thread_limit;
+    err = cuMemcpyHtoD(KernelInfo->ThreadLimitPtr,&thread_limit,sizeof(int32_t));
+
+    if (err != CUDA_SUCCESS) {
+      DP("Error when setting thread limit global\n");
+      return OFFLOAD_FAIL;
+    }
+  }
+
   int blocksPerGrid = team_num>0 ? team_num : 
     DeviceInfo.BlocksPerGrid[device_id];
   int nshared = 0;
 
   // Run on the device
-  DP("launch kernel with %d blocks and %d threads\n", blocksPerGrid, threadsPerBlock);
-  err = cuLaunchKernel((CUfunction)tgt_entry_ptr, 
-    blocksPerGrid, 1, 1, threadsPerBlock, 1, 1, nshared, 0, &args[0], 0);
+  DP("launch kernel with %d blocks and %d threads\n", blocksPerGrid, cudaThreadsPerBlock);
+
+  err = cuLaunchKernel(KernelInfo->Func,
+    blocksPerGrid, 1, 1, cudaThreadsPerBlock, 1, 1, nshared, 0, &args[0], 0);
   if( err != CUDA_SUCCESS )
   {
     DP("Device kernel launching failed!\n");

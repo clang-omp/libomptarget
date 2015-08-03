@@ -175,7 +175,7 @@ INLINE unsigned long PadBytes(
   return (~(unsigned long) size + 1) & (alignment - 1);
 }
 
-INLINE void *SafeMalloc(size_t size, char *msg) // check if success
+INLINE void *SafeMalloc(size_t size, const char *msg) // check if success
 {
   void * ptr = malloc(size);
   PRINT(LD_MEM, "malloc data of size %d for %s: 0x%llx\n", size, msg,
@@ -184,8 +184,9 @@ INLINE void *SafeMalloc(size_t size, char *msg) // check if success
   return ptr;
 }
 
-INLINE void *SafeFree(void *ptr, char *msg)
+INLINE void *SafeFree(void *ptr, const char *msg)
 {
   PRINT(LD_MEM, "free data ptr 0x%llx for %s\n", P64(ptr), msg); 
   free(ptr);
+  return NULL;
 }

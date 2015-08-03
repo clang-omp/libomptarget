@@ -16,6 +16,9 @@
 *.user
 *.sublime-project
 *.sublime-workspace
+.cproject
+.project
+.settings
 
 #==============================================================================#
 # Explicit files to ignore.

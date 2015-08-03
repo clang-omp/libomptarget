@@ -573,7 +573,7 @@ EXTERN double _Complex __kmpc_atomic_cmplx8_div_cpt_rev (kmp_Indent *loc, int gt
 EXTERN double _Complex __kmpc_atomic_cmplx8_swp_cpt (kmp_Indent *loc, int gtid, double _Complex *lhs, double _Complex rhs, int atomicFlag) ;
 
 // non standard
-EXTERN void __kmpc_kernel_init();
+EXTERN void __kmpc_kernel_init(int ThreadLimit);
 EXTERN int  __kmpc_kernel_prepare_parallel(int numThreads, int numLanes);
 EXTERN void __kmpc_kernel_parallel(int numLanes);
 EXTERN void __kmpc_kernel_end_parallel();

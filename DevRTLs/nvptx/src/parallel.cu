@@ -39,12 +39,29 @@
 // support for parallel that goes parallel (1 static level only)
 ////////////////////////////////////////////////////////////////////////////////
 
-// return number of threads that participate to parallel
-EXTERN int __kmpc_kernel_prepare_parallel(int numThreads, int numLanes)
+// return number of cuda threads that participate to parallel
+// calculation has to consider simd implementation in nvptx
+// i.e. (num omp threads * num lanes)
+//
+// cudathreads =
+//    if(num_threads != 0) {
+//      if(thread_limit > 0) {
+//        min (num_threads*numLanes ; thread_limit*numLanes);
+//      } else {
+//        min (num_threads*numLanes; blockDim.x)
+//      }
+//    } else {
+//      if (thread_limit != 0) {
+//        min (thread_limit*numLanes; blockDim.x)
+//      } else { // no thread_limit, no num_threads, use all cuda threads
+//        blockDim.x;
+//      }
+//    }
+EXTERN int __kmpc_kernel_prepare_parallel(int NumThreads, int NumLanes)
 {
-  PRINT0(LD_IO , "call to __kmpc_kernel_init_parallel\n");
+  PRINT0(LD_IO , "call to __kmpc_kernel_prepare_parallel\n");
   int globalThreadId = GetGlobalThreadId();
-  omptarget_nvptx_TaskDescr *currTaskDescr = 
+  omptarget_nvptx_TaskDescr *currTaskDescr =
     omptarget_nvptx_threadPrivateContext.GetTopLevelTaskDescr(globalThreadId);
   ASSERT0(LT_FUSSY, currTaskDescr, "expected a top task descr");
   if (currTaskDescr->InParallelRegion()) {
@@ -53,34 +70,58 @@ EXTERN int __kmpc_kernel_prepare_parallel(int numThreads, int numLanes)
     // todo: support nested parallelism
     return FALSE;
   }
-  uint16_t tnum = omptarget_nvptx_threadPrivateContext.NumThreadsForNextParallel(globalThreadId);
-  if (tnum != 0) {
-    PRINT(LD_PAR, "parallel region pushed a request of %d threads\n", tnum);
-    // reset request
-    omptarget_nvptx_threadPrivateContext.NumThreadsForNextParallel(globalThreadId) = 0;
+
+  uint16_t CudaThreadsForParallel = 0;
+  uint16_t NumThreadsClause =
+      omptarget_nvptx_threadPrivateContext.NumThreadsForNextParallel(
+          globalThreadId);
+
+  // we cannot have more than block size
+  uint16_t CudaThreadsAvail = GetNumberOfThreadsInBlock();
+
+  // this is different from ThreadAvail of OpenMP because we may be
+  // using some of the CUDA threads as SIMD lanes
+
+  if (NumThreadsClause != 0) {
+    // reset request to avoid propagating to successive #parallel
+    omptarget_nvptx_threadPrivateContext.NumThreadsForNextParallel(
+        globalThreadId) = 0;
+
+    // assume that thread_limit*numlanes is already <= CudaThreadsAvail
+    // because that is already checked on the host side (CUDA offloading rtl)
+    if (currTaskDescr->ThreadLimit() != 0)
+      CudaThreadsForParallel =
+          NumThreadsClause*NumLanes < currTaskDescr->ThreadLimit()*NumLanes ?
+              NumThreadsClause*NumLanes : currTaskDescr->ThreadLimit()*NumLanes;
+    else {
+      CudaThreadsForParallel = (NumThreadsClause*NumLanes > CudaThreadsAvail) ?
+          CudaThreadsAvail : NumThreadsClause*NumLanes;
+    }
   } else {
-    // get default
-    tnum = currTaskDescr->NThreads();
-    PRINT(LD_PAR, "parallel region uses default number of threads %d\n", tnum);
+    if (currTaskDescr->ThreadLimit() != 0) {
+      CudaThreadsForParallel =
+          (currTaskDescr->ThreadLimit()*NumLanes > CudaThreadsAvail) ?
+              CudaThreadsAvail : currTaskDescr->ThreadLimit()*NumLanes;
+    } else
+      CudaThreadsForParallel = GetNumberOfThreadsInBlock();
   }
-  int tmax = GetNumberOfProcsInTeam();
-  if (tnum > tmax) {
-    PRINT(LD_PAR, 
-      "parallel region use more threads %d than avail; truncate to %d\n", 
-       tnum, tmax);
-    tnum = tmax;
-  }
-  ASSERT(LT_FUSSY, tnum > 0, "bad thread request of %d threads", tnum);
+
+  ASSERT(LT_FUSSY, CudaThreadsForParallel > 0, "bad thread request of %d threads", CudaThreadsForParallel);
   ASSERT0(LT_FUSSY, GetThreadIdInBlock() == TEAM_MASTER, "only team master can create parallel");
-  // set number of threads on work descriptor  
-  omptarget_nvptx_WorkDescr & workDescr = getMyWorkDescriptor(); 
-  workDescr.WorkTaskDescr()->CopyToWorkDescr(currTaskDescr, tnum);
+
+  // set number of threads on work descriptor
+  // this is different from the number of cuda threads required for the parallel
+  // region
+  omptarget_nvptx_WorkDescr & workDescr = getMyWorkDescriptor();
+  workDescr.WorkTaskDescr()->CopyToWorkDescr(currTaskDescr,
+      CudaThreadsForParallel/NumLanes);
   // init counters (copy start to init)
   workDescr.CounterGroup().Reset();
-  return tnum;
+
+  return CudaThreadsForParallel;
 }
 
-// works only for active parallel looop...
+// works only for active parallel loop...
 EXTERN void __kmpc_kernel_parallel(int numLanes)
 {
   PRINT0(LD_IO | LD_PAR, "call to __kmpc_kernel_parallel\n");
@@ -97,6 +138,23 @@ EXTERN void __kmpc_kernel_parallel(int numLanes)
   workDescr.CounterGroup().Init(omptarget_nvptx_threadPrivateContext.Priv(globalThreadId));
   PRINT(LD_PAR, "thread will execute parallel region with id %d in a team of %d threads\n",
     newTaskDescr->ThreadId(), newTaskDescr->NThreads());
+
+  // each thread sets its omp thread ID when entering a parallel region
+  // based on the number of simd lanes and its cuda thread ID
+  if (numLanes > 1) {
+    // the compiler is requesting lanes for #simd execution
+    // WARNING: assume thread number in #parallel is a multiple of numLanes
+    newTaskDescr->ThreadId() /= numLanes;
+    //newTaskDescr->ThreadsInTeam(); // =  newTaskDescr->ThreadsInTeam()/numLanes;
+  }
+//  } else {
+//    // not a for with a simd inside: use only one lane
+//    // we may have started thread_limit*simd_info CUDA threads
+//    // and we need to set the number of threads to thread_limit value
+//    // FIXME: is this always the case, even if numLanes > 1?
+////    newTaskDescr->ThreadId() = threadIdx.x;
+//    //newTaskDescr->ThreadsInTeam();// = newTaskDescr->ThreadLimit();
+//  }
 }
 
 
