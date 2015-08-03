@@ -11,7 +11,11 @@
 #
 ##===----------------------------------------------------------------------===##
 
-if(CUDA_FOUND)
+if(${CMAKE_SYSTEM_NAME} MATCHES "Linux" AND ${CMAKE_C_COMPILER_ID} MATCHES "Clang")
+
+    message("Using Clang compiler on Linux: not building NVPTX device RTL")
+
+elseif(CUDA_FOUND)
 
     set(cuda_src_files
         src/cancel.cu
