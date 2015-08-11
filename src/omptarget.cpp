@@ -523,11 +523,12 @@ EXTERN void __tgt_unregister_lib(__tgt_bin_desc *desc){
 }
 
 /// Internal function to do the mapping and transfer the data to the device
-static void target_data_begin(DeviceTy & Device, int32_t arg_num,
+static int target_data_begin(DeviceTy & Device, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
 {
   // process each input
   for(int32_t i=0; i<arg_num; ++i){
+    int res;
     void *HstPtrBegin = args[i];
     void *HstPtrBase = args_base[i];
     void *Pointer_TgtPtrBegin;
@@ -555,7 +556,9 @@ static void target_data_begin(DeviceTy & Device, int32_t arg_num,
         (IsNew || (arg_types[i] & tgt_map_always))) {
       DP("Moving %ld bytes (hst:%016lx) -> (tgt:%016lx)\n", (long)arg_sizes[i],
         (long)HstPtrBegin, (long)TgtPtrBegin);
-      Device.data_submit(TgtPtrBegin, HstPtrBegin, arg_sizes[i]);
+      res = Device.data_submit(TgtPtrBegin, HstPtrBegin, arg_sizes[i]);
+      if(res != OFFLOAD_SUCCESS)
+        return OFFLOAD_FAIL;
     }
 
     if (arg_types[i] & tgt_map_pointer /* && Pointer_IsNew */){
@@ -563,23 +566,27 @@ static void target_data_begin(DeviceTy & Device, int32_t arg_num,
         (long)Pointer_TgtPtrBegin, (long)TgtPtrBegin);
       uint64_t Delta = (uint64_t) HstPtrBegin - (uint64_t) HstPtrBase;
       void *TgrPtrBase_Value = (void *)((uint64_t) TgtPtrBegin - Delta);
-      Device.data_submit(Pointer_TgtPtrBegin, &TgrPtrBase_Value, sizeof(void*));
+      res = Device.data_submit(Pointer_TgtPtrBegin, &TgrPtrBase_Value, sizeof(void*));
+      if(res != OFFLOAD_SUCCESS)
+        return OFFLOAD_FAIL;
     }
   }
+
+  return OFFLOAD_SUCCESS;
 }
 
-EXTERN void __tgt_target_data_begin_nowait(int32_t device_id, int32_t arg_num,
+EXTERN int __tgt_target_data_begin_nowait(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
   int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
 {
-  __tgt_target_data_begin(device_id, arg_num, args_base, args, arg_sizes,
+  return __tgt_target_data_begin(device_id, arg_num, args_base, args, arg_sizes,
     arg_types);
 }
 
 /// creates host to the target data mapping, store it in the
 /// libtarget.so internal structure (an entry in a stack of data maps)
 /// and passes the data to the device;
-EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
+EXTERN int __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
 {
   DP("Entering data begin region for device %d with %d mappings\n",
@@ -592,7 +599,7 @@ EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
   }
   if (Devices.size() <= (size_t)device_id){
     DP("Device ID  %d does not have a matching RTL.\n", device_id);
-    return;
+    return OFFLOAD_FAIL;
   }
 
   // Get device info
@@ -601,18 +608,19 @@ EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
   if (!Device.IsInit) {
     if (Device.init() != OFFLOAD_SUCCESS) {
       DP("failed to init device %d\n", device_id);
-      return;
+      return OFFLOAD_FAIL;
     }
   }
 
-  target_data_begin(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  return target_data_begin(Device, arg_num, args_base, args, arg_sizes, arg_types);
 }
 
 
 /// Internal function to undo the mapping and retrieve the data from the device
-static void target_data_end(DeviceTy & Device, int32_t arg_num,
+static int target_data_end(DeviceTy & Device, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
 {
+  int res;
   // process each input
   for(int32_t i=0; i<arg_num; ++i){
     void *HstPtrBegin = args[i];
@@ -635,18 +643,22 @@ static void target_data_end(DeviceTy & Device, int32_t arg_num,
     if ((arg_types[i] & tgt_map_from) && (IsLast || ForceDelete || Always)) {
       DP("Moving %ld bytes (tgt:%016lx) -> (hst:%016lx)\n", (long)arg_sizes[i],
         (long)TgtPtrBegin, (long)HstPtrBegin);
-      Device.data_retrieve(HstPtrBegin, TgtPtrBegin, arg_sizes[i]);
+      res = Device.data_retrieve(HstPtrBegin, TgtPtrBegin, arg_sizes[i]);
+      if(res != OFFLOAD_SUCCESS)
+        return OFFLOAD_FAIL;
     }
     if (IsLast || ForceDelete) {
       Device.deallocTgtPtr(HstPtrBegin, arg_sizes[i], ForceDelete);
     }
   }
+
+  return OFFLOAD_SUCCESS;
 }
 
 /// passes data from the target, release target memory and destroys
 /// the host-target mapping (top entry from the stack of data maps)
 /// created by the last __tgt_target_data_begin
-EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num, 
+EXTERN int __tgt_target_data_end(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
 {
   DP("Entering data end region with %d mappings\n", arg_num);
@@ -657,31 +669,31 @@ EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num,
   }
   if (Devices.size() <= (size_t)device_id){
     DP("Device ID  %d does not have a matching RTL.\n", device_id);
-    return;
+    return OFFLOAD_FAIL;
   }
 
   DeviceTy & Device = Devices[device_id];
   if (!Device.IsInit) {
     DP("uninit device: ignore");
-    return;
+    return OFFLOAD_FAIL;
   }
 
-  target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types);
-
+  return target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types);
 }
 
-EXTERN void __tgt_target_data_end_nowait(int32_t device_id, int32_t arg_num,
+EXTERN int __tgt_target_data_end_nowait(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
   int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
 {
-  __tgt_target_data_end(device_id, arg_num, args_base, args, arg_sizes,
+  return __tgt_target_data_end(device_id, arg_num, args_base, args, arg_sizes,
     arg_types);
 }
 
 /// passes data to/from the target
-EXTERN void __tgt_target_data_update(int32_t device_id, int32_t arg_num, 
+EXTERN int __tgt_target_data_update(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
 {
+  int res;
   DP("Entering data update with %d mappings\n", arg_num);
 
   // No devices available?
@@ -690,14 +702,14 @@ EXTERN void __tgt_target_data_update(int32_t device_id, int32_t arg_num,
   }
   if (Devices.size() <= (size_t)device_id){
     DP("Device ID  %d does not have a matching RTL.\n", device_id);
-    return;
+    return OFFLOAD_FAIL;
   }
 
   // Get device info
   DeviceTy & Device = Devices[device_id];
   if (!Device.IsInit) {
     DP("uninit device: ignore");
-    return;
+    return OFFLOAD_FAIL;
   }
 
   // process each input
@@ -709,21 +721,27 @@ EXTERN void __tgt_target_data_update(int32_t device_id, int32_t arg_num,
     if (arg_types[i] & tgt_map_from) {
       DP("Moving %ld bytes (tgt:%016lx) -> (hst:%016lx)\n", (long)arg_sizes[i],
         (long)TgtPtrBegin, (long)HstPtrBegin);
-      Device.data_retrieve(HstPtrBegin, TgtPtrBegin, arg_sizes[i]);
+      res = Device.data_retrieve(HstPtrBegin, TgtPtrBegin, arg_sizes[i]);
+      if(res != 0)
+        return OFFLOAD_FAIL;
     } 
     if (arg_types[i] & tgt_map_to) {
       DP("Moving %ld bytes (hst:%016lx) -> (tgt:%016lx)\n", (long)arg_sizes[i],
         (long)HstPtrBegin, (long)TgtPtrBegin);
-      Device.data_submit(TgtPtrBegin, HstPtrBegin, arg_sizes[i]);
+      res = Device.data_submit(TgtPtrBegin, HstPtrBegin, arg_sizes[i]);
+      if(res != 0)
+        return OFFLOAD_FAIL;
     }
   }
+
+  return OFFLOAD_SUCCESS;
 }
 
-EXTERN void __tgt_target_data_update_nowait(int32_t device_id, int32_t arg_num,
+EXTERN int __tgt_target_data_update_nowait(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
   int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
 {
-  __tgt_target_data_update(device_id, arg_num, args_base, args, arg_sizes,
+  return __tgt_target_data_update(device_id, arg_num, args_base, args, arg_sizes,
     arg_types);
 }
 
@@ -897,8 +915,12 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
     }
   }
 
+  int res;
+
   //Move data to device
-  target_data_begin(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  res = target_data_begin(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  if (res != OFFLOAD_SUCCESS)
+    return OFFLOAD_FAIL;
 
   std::vector<void*> tgt_args;
 
@@ -928,22 +950,24 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
   }
 
   //Launch device execution
-  int rc;
   DP("Launching target execution with pointer %016lx (index=%d).\n", 
     (Elf64_Addr)TargetTable->EntriesBegin[TM->Index].addr, TM->Index);
   if (IsTeamConstruct) {
-    rc = Device.run_team_region(TargetTable->EntriesBegin[TM->Index].addr,
+    res = Device.run_team_region(TargetTable->EntriesBegin[TM->Index].addr,
       &tgt_args[0], tgt_args.size(), team_num, thread_limit);
   } else {
-    rc = Device.run_region(TargetTable->EntriesBegin[TM->Index].addr,
+    res = Device.run_region(TargetTable->EntriesBegin[TM->Index].addr,
       &tgt_args[0], tgt_args.size());
   }
 
-  if (rc)
+  if (res != OFFLOAD_SUCCESS)
     return OFFLOAD_FAIL;
 
   //Move data from device
-  target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  res = target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  if (res != OFFLOAD_SUCCESS)
+    return OFFLOAD_FAIL;
+
   return OFFLOAD_SUCCESS;
 }
 
