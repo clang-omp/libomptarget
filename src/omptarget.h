@@ -84,25 +84,25 @@ void __tgt_unregister_lib(__tgt_bin_desc *desc);
 // creates host to the target data mapping, store it in the
 // libtarget.so internal structure (an entry in a stack of data maps) and
 // passes the data to the device;
-int __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
+void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types);
-int __tgt_target_data_begin_nowait(int32_t device_id, int32_t arg_num,
+void __tgt_target_data_begin_nowait(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
   int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList);
 
 // passes data from the target, release target memory and destroys the
 // host-target mapping (top entry from the stack of data maps) created by
 // the last __tgt_target_data_begin
-int __tgt_target_data_end(int32_t device_id, int32_t arg_num,
+void __tgt_target_data_end(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types);
-int __tgt_target_data_end_nowait(int32_t device_id, int32_t arg_num,
+void __tgt_target_data_end_nowait(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
   int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList);
 
 /// passes data to/from the target
-int __tgt_target_data_update(int32_t device_id, int32_t arg_num,
+void __tgt_target_data_update(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types);
-int __tgt_target_data_update_nowait(int32_t device_id, int32_t arg_num,
+void __tgt_target_data_update_nowait(int32_t device_id, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
   int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList);
 
