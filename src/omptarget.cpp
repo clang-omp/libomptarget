@@ -164,16 +164,41 @@ static HostPtrToTableMapTy HostPtrToTableMap;
 // aee: non compliant. This need to be integrated in KMPC; can keep it
 // here for the moment
 
-static int DefaultDevice = 0;
+struct DefaultValuesTy {
+  int DefaultDevice;
+  DefaultValuesTy() :
+    DefaultDevice{ParseNonNegativeInteger("OMP_DEFAULT_DEVICE", 0)} { }
+
+private:
+  int ParseNonNegativeInteger(const char* name, int defaultValue) {
+    char *env = getenv(name);
+    // Is variable set and not empty?
+    if (env != NULL && *env != '\0') {
+      DP("Parsing %s...\n", name);
+      errno = 0;
+      char* endptr;
+      int parsed = strtol(env, &endptr, 10);
+      // Did strtol parse the complete string and is the value non-negative?
+      if (errno == 0 && *endptr == '\0' && parsed >= 0) {
+        return parsed;
+      } else {
+        DP("%s must be a non-negative integer value!\n", name);
+      }
+    }
+    return defaultValue;
+  }
+};
+
+static DefaultValuesTy DefaultValues{};
 
 //aee non-compliant
 void omp_set_default_device(int device_num){
-  DefaultDevice = device_num;
+  DefaultValues.DefaultDevice = device_num;
 }
 
 //aee non-compliant
 int omp_get_default_device(void){
-  return DefaultDevice;
+  return DefaultValues.DefaultDevice;
 }
 
 int omp_get_num_devices(void) {
@@ -662,7 +687,7 @@ EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num,
 
   DeviceTy & Device = Devices[device_id];
   if (!Device.IsInit) {
-    DP("uninit device: ignore");
+    DP("uninit device: ignore\n");
     return;
   }
 
@@ -696,7 +721,7 @@ EXTERN void __tgt_target_data_update(int32_t device_id, int32_t arg_num,
   // Get device info
   DeviceTy & Device = Devices[device_id];
   if (!Device.IsInit) {
-    DP("uninit device: ignore");
+    DP("uninit device: ignore\n");
     return;
   }
 
