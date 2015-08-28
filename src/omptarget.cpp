@@ -548,11 +548,12 @@ EXTERN void __tgt_unregister_lib(__tgt_bin_desc *desc){
 }
 
 /// Internal function to do the mapping and transfer the data to the device
-static void target_data_begin(DeviceTy & Device, int32_t arg_num,
+static int target_data_begin(DeviceTy & Device, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
 {
   // process each input
   for(int32_t i=0; i<arg_num; ++i){
+    int res;
     void *HstPtrBegin = args[i];
     void *HstPtrBase = args_base[i];
     void *Pointer_TgtPtrBegin;
@@ -580,7 +581,9 @@ static void target_data_begin(DeviceTy & Device, int32_t arg_num,
         (IsNew || (arg_types[i] & tgt_map_always))) {
       DP("Moving %ld bytes (hst:%016lx) -> (tgt:%016lx)\n", (long)arg_sizes[i],
         (long)HstPtrBegin, (long)TgtPtrBegin);
-      Device.data_submit(TgtPtrBegin, HstPtrBegin, arg_sizes[i]);
+      res = Device.data_submit(TgtPtrBegin, HstPtrBegin, arg_sizes[i]);
+      if(res != OFFLOAD_SUCCESS)
+        return OFFLOAD_FAIL;
     }
 
     if (arg_types[i] & tgt_map_pointer /* && Pointer_IsNew */){
@@ -588,9 +591,13 @@ static void target_data_begin(DeviceTy & Device, int32_t arg_num,
         (long)Pointer_TgtPtrBegin, (long)TgtPtrBegin);
       uint64_t Delta = (uint64_t) HstPtrBegin - (uint64_t) HstPtrBase;
       void *TgrPtrBase_Value = (void *)((uint64_t) TgtPtrBegin - Delta);
-      Device.data_submit(Pointer_TgtPtrBegin, &TgrPtrBase_Value, sizeof(void*));
+      res = Device.data_submit(Pointer_TgtPtrBegin, &TgrPtrBase_Value, sizeof(void*));
+      if(res != OFFLOAD_SUCCESS)
+        return OFFLOAD_FAIL;
     }
   }
+
+  return OFFLOAD_SUCCESS;
 }
 
 EXTERN void __tgt_target_data_begin_nowait(int32_t device_id, int32_t arg_num,
@@ -635,9 +642,10 @@ EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
 
 
 /// Internal function to undo the mapping and retrieve the data from the device
-static void target_data_end(DeviceTy & Device, int32_t arg_num,
+static int target_data_end(DeviceTy & Device, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
 {
+  int res;
   // process each input
   for(int32_t i=0; i<arg_num; ++i){
     void *HstPtrBegin = args[i];
@@ -660,12 +668,16 @@ static void target_data_end(DeviceTy & Device, int32_t arg_num,
     if ((arg_types[i] & tgt_map_from) && (IsLast || ForceDelete || Always)) {
       DP("Moving %ld bytes (tgt:%016lx) -> (hst:%016lx)\n", (long)arg_sizes[i],
         (long)TgtPtrBegin, (long)HstPtrBegin);
-      Device.data_retrieve(HstPtrBegin, TgtPtrBegin, arg_sizes[i]);
+      res = Device.data_retrieve(HstPtrBegin, TgtPtrBegin, arg_sizes[i]);
+      if(res != OFFLOAD_SUCCESS)
+        return OFFLOAD_FAIL;
     }
     if (IsLast || ForceDelete) {
       Device.deallocTgtPtr(HstPtrBegin, arg_sizes[i], ForceDelete);
     }
   }
+
+  return OFFLOAD_SUCCESS;
 }
 
 /// passes data from the target, release target memory and destroys
@@ -922,8 +934,12 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
     }
   }
 
+  int res;
+
   //Move data to device
-  target_data_begin(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  res = target_data_begin(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  if (res != OFFLOAD_SUCCESS)
+    return OFFLOAD_FAIL;
 
   std::vector<void*> tgt_args;
 
@@ -953,22 +969,24 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
   }
 
   //Launch device execution
-  int rc;
   DP("Launching target execution with pointer %016lx (index=%d).\n", 
     (Elf64_Addr)TargetTable->EntriesBegin[TM->Index].addr, TM->Index);
   if (IsTeamConstruct) {
-    rc = Device.run_team_region(TargetTable->EntriesBegin[TM->Index].addr,
+    res = Device.run_team_region(TargetTable->EntriesBegin[TM->Index].addr,
       &tgt_args[0], tgt_args.size(), team_num, thread_limit);
   } else {
-    rc = Device.run_region(TargetTable->EntriesBegin[TM->Index].addr,
+    res = Device.run_region(TargetTable->EntriesBegin[TM->Index].addr,
       &tgt_args[0], tgt_args.size());
   }
 
-  if (rc)
+  if (res != OFFLOAD_SUCCESS)
     return OFFLOAD_FAIL;
 
   //Move data from device
-  target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  res = target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  if (res != OFFLOAD_SUCCESS)
+    return OFFLOAD_FAIL;
+
   return OFFLOAD_SUCCESS;
 }
 
