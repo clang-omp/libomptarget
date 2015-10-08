@@ -430,7 +430,7 @@ __tgt_target_table *__tgt_rtl_load_binary(int32_t device_id, __tgt_device_image 
   return DeviceInfo.getOffloadEntriesTable(device_id);
 }
 
-void *__tgt_rtl_data_alloc(int32_t device_id, int64_t size){
+void *__tgt_rtl_data_alloc(int32_t device_id, int64_t size, int32_t id){
 
   //Set the context we are using  
   CUresult err = cuCtxSetCurrent (DeviceInfo.Contexts[device_id]);
@@ -454,7 +454,7 @@ void *__tgt_rtl_data_alloc(int32_t device_id, int64_t size){
   return vptr;
 }
 
-int32_t __tgt_rtl_data_submit(int32_t device_id, void *tgt_ptr, void *hst_ptr, int64_t size){
+int32_t __tgt_rtl_data_submit(int32_t device_id, void *tgt_ptr, void *hst_ptr, int64_t size, int32_t id){
   //Set the context we are using
   CUresult err = cuCtxSetCurrent (DeviceInfo.Contexts[device_id]);
   if (err != CUDA_SUCCESS)
@@ -476,7 +476,7 @@ int32_t __tgt_rtl_data_submit(int32_t device_id, void *tgt_ptr, void *hst_ptr, i
   return OFFLOAD_SUCCESS;
 }
 
-int32_t __tgt_rtl_data_retrieve(int32_t device_id, void *hst_ptr, void *tgt_ptr, int64_t size){
+int32_t __tgt_rtl_data_retrieve(int32_t device_id, void *hst_ptr, void *tgt_ptr, int64_t size, int32_t id){
   //Set the context we are using
   CUresult err = cuCtxSetCurrent (DeviceInfo.Contexts[device_id]);
   if (err != CUDA_SUCCESS)
@@ -498,7 +498,7 @@ int32_t __tgt_rtl_data_retrieve(int32_t device_id, void *hst_ptr, void *tgt_ptr,
   return OFFLOAD_SUCCESS;
 }
 
-int32_t __tgt_rtl_data_delete(int32_t device_id, void* tgt_ptr){
+int32_t __tgt_rtl_data_delete(int32_t device_id, void* tgt_ptr, int32_t id){
   //Set the context we are using
   CUresult err = cuCtxSetCurrent (DeviceInfo.Contexts[device_id]);
   if (err != CUDA_SUCCESS)

@@ -70,18 +70,18 @@ struct DeviceTy {
   DeviceTy(RTLInfoTy *RTL) : DeviceID(-1), RTL(RTL), RTLDeviceID(-1),
     IsInit(false), HostDataToTargetMap(), PendingConstrDestrHostPtrList() {}
 
-  void *getOrAllocTgtPtr(void* HstPtrBegin, void* HstPtrBase, long Size,
+  void *getOrAllocTgtPtr(void* HstPtrBegin, void* HstPtrBase, long Size, int32_t Id,
       long &IsNew, long UpdateRefCount = true);
   void *getTgtPtrBegin(void* HstPtrBegin, long Size, long &IsLast,
       long UpdateRefCount = true);
-  void deallocTgtPtr(void* TgtPtrBegin, long Size, long ForceDelete);
+  void deallocTgtPtr(void* TgtPtrBegin, long Size, int32_t Id, long ForceDelete);
 
   // calls to RTL
   int32_t init();
   __tgt_target_table *load_binary(void* Img);
 
-  int32_t data_submit(void* TgtPtrBegin, void* HstPtrBegin, int64_t Size);
-  int32_t data_retrieve(void* HstPtrBegin, void* TgtPtrBegin, int64_t Size);
+  int32_t data_submit(void* TgtPtrBegin, void* HstPtrBegin, int64_t Size, int32_t Id);
+  int32_t data_retrieve(void* HstPtrBegin, void* TgtPtrBegin, int64_t Size, int32_t Id);
 
   int32_t run_region(void* TgtEntryPtr, void** TgtVarsPtr, int32_t TgtVarsSize);
   int32_t run_team_region(void* TgtEntryPtr, void** TgtVarsPtr,
@@ -93,10 +93,10 @@ struct RTLInfoTy{
   typedef int32_t (number_of_devices_ty)();
   typedef int32_t (init_device_ty)(int32_t);
   typedef __tgt_target_table* (load_binary_ty)(int32_t, void*);
-  typedef void*   (data_alloc_ty)(int32_t, int64_t);
-  typedef int32_t (data_submit_ty)(int32_t, void*, void*, int64_t);
-  typedef int32_t (data_retrieve_ty)(int32_t, void*, void*, int64_t);
-  typedef int32_t (data_delete_ty)(int32_t, void*);
+  typedef void*   (data_alloc_ty)(int32_t, int64_t, int32_t);
+  typedef int32_t (data_submit_ty)(int32_t, void*, void*, int64_t, int32_t);
+  typedef int32_t (data_retrieve_ty)(int32_t, void*, void*, int64_t, int32_t);
+  typedef int32_t (data_delete_ty)(int32_t, void*, int32_t);
   typedef int32_t (run_region_ty)(int32_t, void*, void**, int32_t);
   typedef int32_t (run_team_region_ty)(int32_t, void*, void**, int32_t, int32_t, int32_t);
 
@@ -243,7 +243,7 @@ void *DeviceTy::getTgtPtrBegin(void* HstPtrBegin, long Size, long &IsLast,
 
 // return the target pointer begin (where the data will be moved)
 void *DeviceTy::getOrAllocTgtPtr(void* HstPtrBegin, void* HstPtrBase,
-  long Size, long &IsNew, long UpdateRefCount)
+  long Size, int32_t Id, long &IsNew, long UpdateRefCount)
 {
   long hp = (long) HstPtrBegin;
   IsNew = false;
@@ -268,14 +268,14 @@ void *DeviceTy::getOrAllocTgtPtr(void* HstPtrBegin, void* HstPtrBase,
 
   //It is not contained we should create a new entry for it
   IsNew = true;
-  long tp = (long) RTL->data_alloc(RTLDeviceID, Size);
+  long tp = (long) RTL->data_alloc(RTLDeviceID, Size, Id);
   HostDataToTargetMap.push_front(
     HostDataToTargetTy((long)HstPtrBase, hp, hp+Size, tp, tp+Size));
   return (void*)tp;
 }
 
 
-void DeviceTy::deallocTgtPtr(void* HstPtrBegin, long Size, long ForceDelete)
+void DeviceTy::deallocTgtPtr(void* HstPtrBegin, long Size, int32_t Id, long ForceDelete)
 {
   long hp = (long)HstPtrBegin;
 
@@ -296,7 +296,7 @@ void DeviceTy::deallocTgtPtr(void* HstPtrBegin, long Size, long ForceDelete)
         DP("Deleting tgt data 0x%016llx of size %lld\n",
             (long long) HT.TgtPtrBegin,
             (long long)Size);
-        RTL->data_delete(RTLDeviceID, (void *) HT.TgtPtrBegin);
+        RTL->data_delete(RTLDeviceID, (void *) HT.TgtPtrBegin, Id);
         HostDataToTargetMap.erase(ii);
       }
       return;
@@ -324,16 +324,16 @@ __tgt_target_table *DeviceTy::load_binary(void* Img)
 
 // submit data to device
 int32_t DeviceTy::data_submit(void* TgtPtrBegin, void* HstPtrBegin,
-  int64_t Size)
+  int64_t Size, int32_t Id)
 {
-  return RTL->data_submit(RTLDeviceID, TgtPtrBegin, HstPtrBegin, Size);
+  return RTL->data_submit(RTLDeviceID, TgtPtrBegin, HstPtrBegin, Size, Id);
 }
 
 // retrieve data from device
 int32_t DeviceTy::data_retrieve(void* HstPtrBegin, void* TgtPtrBegin,
-  int64_t Size)
+  int64_t Size, int32_t Id)
 {
-  return RTL->data_retrieve(RTLDeviceID, HstPtrBegin, TgtPtrBegin, Size);
+  return RTL->data_retrieve(RTLDeviceID, HstPtrBegin, TgtPtrBegin, Size, Id);
 }
 
 // run region on device
@@ -549,7 +549,8 @@ EXTERN void __tgt_unregister_lib(__tgt_bin_desc *desc){
 
 /// Internal function to do the mapping and transfer the data to the device
 static int target_data_begin(DeviceTy & Device, int32_t arg_num,
-  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  int32_t *arg_ids)
 {
   // process each input
   for(int32_t i=0; i<arg_num; ++i){
@@ -562,7 +563,7 @@ static int target_data_begin(DeviceTy & Device, int32_t arg_num,
       DP("has a pointer entry: \n");
       // base is address of poiner
       Pointer_TgtPtrBegin = Device.getOrAllocTgtPtr(HstPtrBase, HstPtrBase,
-        sizeof(void *), Pointer_IsNew);
+        sizeof(void *), -1, Pointer_IsNew);
       DP("There are %ld bytes allocated at target address %016lx\n",
          (long)sizeof(void *), (long)Pointer_TgtPtrBegin);
       assert(Pointer_TgtPtrBegin && "Data allocation by RTL returned invalid ptr");
@@ -571,7 +572,7 @@ static int target_data_begin(DeviceTy & Device, int32_t arg_num,
     }
 
     void *TgtPtrBegin = Device.getOrAllocTgtPtr(HstPtrBegin, HstPtrBase,
-      arg_sizes[i], IsNew);
+      arg_sizes[i], arg_ids[i], IsNew);
     DP("There are %ld bytes allocated at target address %016lx - is new %ld\n",
       (long)arg_sizes[i], (long)TgtPtrBegin, IsNew);
     assert(TgtPtrBegin && "Data allocation by RTL returned invalid ptr");
@@ -581,7 +582,7 @@ static int target_data_begin(DeviceTy & Device, int32_t arg_num,
         (IsNew || (arg_types[i] & tgt_map_always))) {
       DP("Moving %ld bytes (hst:%016lx) -> (tgt:%016lx)\n", (long)arg_sizes[i],
         (long)HstPtrBegin, (long)TgtPtrBegin);
-      res = Device.data_submit(TgtPtrBegin, HstPtrBegin, arg_sizes[i]);
+      res = Device.data_submit(TgtPtrBegin, HstPtrBegin, arg_sizes[i], arg_ids[i]);
       if(res != OFFLOAD_SUCCESS)
         return OFFLOAD_FAIL;
     }
@@ -591,7 +592,7 @@ static int target_data_begin(DeviceTy & Device, int32_t arg_num,
         (long)Pointer_TgtPtrBegin, (long)TgtPtrBegin);
       uint64_t Delta = (uint64_t) HstPtrBegin - (uint64_t) HstPtrBase;
       void *TgrPtrBase_Value = (void *)((uint64_t) TgtPtrBegin - Delta);
-      res = Device.data_submit(Pointer_TgtPtrBegin, &TgrPtrBase_Value, sizeof(void*));
+      res = Device.data_submit(Pointer_TgtPtrBegin, &TgrPtrBase_Value, sizeof(void*), -1);
       if(res != OFFLOAD_SUCCESS)
         return OFFLOAD_FAIL;
     }
@@ -601,18 +602,19 @@ static int target_data_begin(DeviceTy & Device, int32_t arg_num,
 }
 
 EXTERN void __tgt_target_data_begin_nowait(int32_t device_id, int32_t arg_num,
-  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types, int32_t *arg_ids,
   int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
 {
   __tgt_target_data_begin(device_id, arg_num, args_base, args, arg_sizes,
-    arg_types);
+    arg_types, arg_ids);
 }
 
 /// creates host to the target data mapping, store it in the
 /// libtarget.so internal structure (an entry in a stack of data maps)
 /// and passes the data to the device;
 EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
-  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  int32_t *arg_ids)
 {
   DP("Entering data begin region for device %d with %d mappings\n",
     device_id, arg_num);
@@ -637,13 +639,14 @@ EXTERN void __tgt_target_data_begin(int32_t device_id, int32_t arg_num,
     }
   }
 
-  target_data_begin(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  target_data_begin(Device, arg_num, args_base, args, arg_sizes, arg_types, arg_ids);
 }
 
 
 /// Internal function to undo the mapping and retrieve the data from the device
 static int target_data_end(DeviceTy & Device, int32_t arg_num,
-  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  int32_t *arg_ids)
 {
   int res;
   // process each input
@@ -656,7 +659,7 @@ static int target_data_end(DeviceTy & Device, int32_t arg_num,
       // base is pointer begin
       Device.getTgtPtrBegin(HstPtrBase, sizeof(void*), IsLast);
       if (IsLast || ForceDelete) {
-        Device.deallocTgtPtr(HstPtrBase, sizeof(void*), ForceDelete);
+        Device.deallocTgtPtr(HstPtrBase, sizeof(void*), -1, ForceDelete);
       }
     }
     void *TgtPtrBegin = Device.getTgtPtrBegin(HstPtrBegin, arg_sizes[i], IsLast);
@@ -668,12 +671,12 @@ static int target_data_end(DeviceTy & Device, int32_t arg_num,
     if ((arg_types[i] & tgt_map_from) && (IsLast || ForceDelete || Always)) {
       DP("Moving %ld bytes (tgt:%016lx) -> (hst:%016lx)\n", (long)arg_sizes[i],
         (long)TgtPtrBegin, (long)HstPtrBegin);
-      res = Device.data_retrieve(HstPtrBegin, TgtPtrBegin, arg_sizes[i]);
+      res = Device.data_retrieve(HstPtrBegin, TgtPtrBegin, arg_sizes[i], arg_ids[i]);
       if(res != OFFLOAD_SUCCESS)
         return OFFLOAD_FAIL;
     }
     if (IsLast || ForceDelete) {
-      Device.deallocTgtPtr(HstPtrBegin, arg_sizes[i], ForceDelete);
+      Device.deallocTgtPtr(HstPtrBegin, arg_sizes[i], arg_ids[i], ForceDelete);
     }
   }
 
@@ -683,8 +686,9 @@ static int target_data_end(DeviceTy & Device, int32_t arg_num,
 /// passes data from the target, release target memory and destroys
 /// the host-target mapping (top entry from the stack of data maps)
 /// created by the last __tgt_target_data_begin
-EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num, 
-  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
+EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  int32_t *arg_ids)
 {
   DP("Entering data end region with %d mappings\n", arg_num);
 
@@ -703,21 +707,22 @@ EXTERN void __tgt_target_data_end(int32_t device_id, int32_t arg_num,
     return;
   }
 
-  target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types, arg_ids);
 
 }
 
 EXTERN void __tgt_target_data_end_nowait(int32_t device_id, int32_t arg_num,
-  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types, int32_t *arg_ids,
   int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
 {
   __tgt_target_data_end(device_id, arg_num, args_base, args, arg_sizes,
-    arg_types);
+    arg_types, arg_ids);
 }
 
 /// passes data to/from the target
-EXTERN void __tgt_target_data_update(int32_t device_id, int32_t arg_num, 
-  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
+EXTERN void __tgt_target_data_update(int32_t device_id, int32_t arg_num,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  int32_t *arg_ids)
 {
   DP("Entering data update with %d mappings\n", arg_num);
 
@@ -746,22 +751,22 @@ EXTERN void __tgt_target_data_update(int32_t device_id, int32_t arg_num,
     if (arg_types[i] & tgt_map_from) {
       DP("Moving %ld bytes (tgt:%016lx) -> (hst:%016lx)\n", (long)arg_sizes[i],
         (long)TgtPtrBegin, (long)HstPtrBegin);
-      Device.data_retrieve(HstPtrBegin, TgtPtrBegin, arg_sizes[i]);
-    } 
+      Device.data_retrieve(HstPtrBegin, TgtPtrBegin, arg_sizes[i], arg_ids[i]);
+    }
     if (arg_types[i] & tgt_map_to) {
       DP("Moving %ld bytes (hst:%016lx) -> (tgt:%016lx)\n", (long)arg_sizes[i],
         (long)HstPtrBegin, (long)TgtPtrBegin);
-      Device.data_submit(TgtPtrBegin, HstPtrBegin, arg_sizes[i]);
+      Device.data_submit(TgtPtrBegin, HstPtrBegin, arg_sizes[i], arg_ids[i]);
     }
   }
 }
 
 EXTERN void __tgt_target_data_update_nowait(int32_t device_id, int32_t arg_num,
-  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types, int32_t *arg_ids,
   int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
 {
   __tgt_target_data_update(device_id, arg_num, args_base, args, arg_sizes,
-    arg_types);
+    arg_types, arg_ids);
 }
 
 /// performs the same actions as data_begin in case arg_num is
@@ -773,7 +778,7 @@ EXTERN void __tgt_target_data_update_nowait(int32_t device_id, int32_t arg_num,
 /// otherwise
 static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
   void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
-  int32_t team_num, int32_t thread_limit, 
+  int32_t *arg_ids, int32_t team_num, int32_t thread_limit,
   int IsTeamConstruct, int IsConstrDestrRecursiveCall)
 {
   DP("Entering target region with entry point %016lx and device Id %d\n", 
@@ -821,7 +826,7 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
       ii=Device.PendingConstrDestrHostPtrList.begin(), 
       ie=Device.PendingConstrDestrHostPtrList.end(); ii!=ie ; ++ii) {
       void *ConstrDestrHostPtr = *ii;
-      int rc = target(device_id, ConstrDestrHostPtr, 0, NULL, NULL, NULL, NULL, 1, 1, 
+      int rc = target(device_id, ConstrDestrHostPtr, 0, NULL, NULL, NULL, NULL, NULL, 1, 1,
         true /*team*/, true /*recursive*/);
       if (rc != OFFLOAD_SUCCESS) {
         DP("failed to run constr/destr... enqueue it\n");
@@ -937,7 +942,7 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
   int res;
 
   //Move data to device
-  res = target_data_begin(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  res = target_data_begin(Device, arg_num, args_base, args, arg_sizes, arg_types, arg_ids);
   if (res != OFFLOAD_SUCCESS)
     return OFFLOAD_FAIL;
 
@@ -983,7 +988,7 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
     return OFFLOAD_FAIL;
 
   //Move data from device
-  res = target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types);
+  res = target_data_end(Device, arg_num, args_base, args, arg_sizes, arg_types, arg_ids);
   if (res != OFFLOAD_SUCCESS)
     return OFFLOAD_FAIL;
 
@@ -991,36 +996,36 @@ static int target(int32_t device_id, void *host_ptr, int32_t arg_num,
 }
 
 EXTERN int __tgt_target(int32_t device_id, void *host_ptr, int32_t arg_num,
-  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types)
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types, int32_t *arg_ids)
 {
-  return target(device_id, host_ptr, arg_num, args_base, args, 
-    arg_sizes, arg_types, 0, 0, false /*team*/, false /*recursive*/);
+  return target(device_id, host_ptr, arg_num, args_base, args,
+    arg_sizes, arg_types, arg_ids, 0, 0, false /*team*/, false /*recursive*/);
 }
 
 EXTERN int __tgt_target_nowait(int32_t device_id, void *host_ptr, int32_t arg_num,
-  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types, int32_t *arg_ids,
   int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
 {
   return __tgt_target(device_id, host_ptr, arg_num, args_base, args, arg_sizes,
-    arg_types);
+    arg_types, arg_ids);
 }
 
-EXTERN int __tgt_target_teams(int32_t device_id, void *host_ptr, int32_t arg_num, 
-  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
-  int32_t team_num, int32_t thread_limit) 
+EXTERN int __tgt_target_teams(int32_t device_id, void *host_ptr, int32_t arg_num,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types, int32_t *arg_ids,
+  int32_t team_num, int32_t thread_limit)
 {
-  return target(device_id, host_ptr, arg_num, args_base, args, 
-    arg_sizes, arg_types, team_num, thread_limit, 
+  return target(device_id, host_ptr, arg_num, args_base, args,
+    arg_sizes, arg_types, arg_ids, team_num, thread_limit,
     true /*team*/, false /*recursive*/);
 }
 
 EXTERN int __tgt_target_teams_nowait(int32_t device_id, void *host_ptr, int32_t arg_num,
-  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types,
+  void** args_base, void **args, int64_t *arg_sizes, int32_t *arg_types, int32_t *arg_ids,
   int32_t team_num, int32_t thread_limit,
   int32_t depNum, void * depList, int32_t noAliasDepNum, void * noAliasDepList)
 {
   return __tgt_target_teams(device_id, host_ptr, arg_num, args_base, args,
-    arg_sizes, arg_types, team_num, thread_limit);
+    arg_sizes, arg_types, arg_ids, team_num, thread_limit);
 }
 
 
